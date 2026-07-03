@@ -29,6 +29,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { TomorrowMessageCard } from '../../components/tomorrow-message-card';
+import { TomorrowMessageView } from '../../components/tomorrow-message-view';
 import { db } from '../../firebase';
 import { useAuth } from '../../lib/auth-context';
 import { joinMatchingPool, leaveMatchingPool, tryMatch } from '../../lib/matching';
@@ -306,11 +308,16 @@ export default function HomeScreen() {
           )}
         </View>
 
+        {/* 明日の自分へのメッセージ（日時指定の下に配置）。鳴動中は停止画面側に表示する。 */}
+        {status !== 'ringing' && <TomorrowMessageCard />}
+
         {/* 下部：鳴動中は「アラームを止める」、それ以外は案内文を表示 */}
         <View style={styles.bottomSection}>
           {status === 'ringing' ? (
             <View style={styles.ringingBox}>
               <Text style={styles.ringingTitle}>⏰ 起きる時間です！</Text>
+              {/* 昨日の23時の自分からのメッセージ（あれば表示） */}
+              <TomorrowMessageView />
               <TouchableOpacity style={styles.stopButton} onPress={stopAlarmAndMatch}>
                 <Text style={styles.stopButtonText}>アラームを止める</Text>
               </TouchableOpacity>
