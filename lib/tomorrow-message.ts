@@ -7,6 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // このメッセージ用の保存キー。
 const KEY_TEXT = '@wakeupapp:tomorrowMessage'; // メッセージ本文
 const KEY_EXPIRES = '@wakeupapp:tomorrowMessageExpiresAt'; // リセット時刻（ミリ秒）
+const KEY_SAVED_AT = '@wakeupapp:tomorrowMessageSavedAt'; // 入力した時刻ラベル（例 "22:45"）
 
 // アラーム設定はホーム画面が保存しているキーをそのまま読む（既存の仕組みに合わせる）。
 const KEY_ALARM_TIME = '@wakeupapp:alarmTime'; // "7:15" のような "時:分"
@@ -46,29 +47,49 @@ function computeExpiresAt(hour: number, minute: number): number {
   return next.getTime() + RESET_AFTER_MS;
 }
 
-// メッセージを保存する。あわせて「アラーム時刻＋30分」のリセット時刻も記録する。
+// メッセージを保存する。あわせて「アラーム時刻＋30分」のリセット時刻と、入力した時刻も記録する。
 export async function saveTomorrowMessage(text: string): Promise<void> {
   const { hour, minute } = await getSavedAlarm();
   const expiresAt = computeExpiresAt(hour, minute);
+  // 入力した時刻を "22:45" の形で記録する（「昨日の◯◯のあなたから」に使う）。
+  const now = new Date();
+  const timeLabel = `${now.getHours()}:${now.getMinutes().toString().padStart(2, '0')}`;
   await AsyncStorage.setItem(KEY_TEXT, text);
   await AsyncStorage.setItem(KEY_EXPIRES, String(expiresAt));
+  await AsyncStorage.setItem(KEY_SAVED_AT, timeLabel);
 }
 
-// メッセージを読む。リセット時刻を過ぎていたら空にして '' を返す。
-export async function loadTomorrowMessage(): Promise<string> {
+// 内部用：有効なメッセージを {本文, 入力時刻ラベル} で返す。期限切れなら空にして null を返す。
+async function readValidMessage(): Promise<{ text: string; timeLabel: string } | null> {
   const text = await AsyncStorage.getItem(KEY_TEXT);
-  if (!text) return '';
+  if (!text) return null;
   const expiresStr = await AsyncStorage.getItem(KEY_EXPIRES);
   const expiresAt = expiresStr ? Number(expiresStr) : 0;
   if (expiresAt && Date.now() >= expiresAt) {
     await clearTomorrowMessage(); // 期限切れ → 空にする
-    return '';
+    return null;
   }
-  return text;
+  const timeLabel = (await AsyncStorage.getItem(KEY_SAVED_AT)) ?? '';
+  return { text, timeLabel };
+}
+
+// メッセージ本文だけを読む（無ければ ''）。
+export async function loadTomorrowMessage(): Promise<string> {
+  const v = await readValidMessage();
+  return v ? v.text : '';
+}
+
+// メッセージ本文＋入力した時刻ラベルを読む（無ければ null）。
+export async function loadTomorrowMessageWithTime(): Promise<{
+  text: string;
+  timeLabel: string;
+} | null> {
+  return readValidMessage();
 }
 
 // メッセージを消す。
 export async function clearTomorrowMessage(): Promise<void> {
   await AsyncStorage.removeItem(KEY_TEXT);
   await AsyncStorage.removeItem(KEY_EXPIRES);
+  await AsyncStorage.removeItem(KEY_SAVED_AT);
 }

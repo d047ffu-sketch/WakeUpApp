@@ -5,7 +5,7 @@
 
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
-import { loadTomorrowMessage } from './tomorrow-message';
+import { loadTomorrowMessageWithTime } from './tomorrow-message';
 
 // 通知はスマホ（iOS / Android）専用。web では expo-notifications の各メソッドが
 // 例外を投げるため、web のときは何もしない（no-op）ようにガードする。
@@ -57,9 +57,11 @@ export async function setupNotifications(): Promise<boolean> {
 export async function scheduleDailyAlarm(hour: number, minute: number): Promise<void> {
   if (isWeb) return;
   // 「明日の自分へのメッセージ」があれば、通知本文にそのメッセージを載せる。
-  const message = await loadTomorrowMessage();
-  const body = message
-    ? `昨日の23時のあなたから：\n「${message}」`
+  // 「昨日の◯◯のあなたから」の◯◯は、メッセージを入力した時刻を使う。
+  const saved = await loadTomorrowMessageWithTime();
+  const fromLabel = saved?.timeLabel ? `昨日の${saved.timeLabel}のあなたから` : '昨日のあなたから';
+  const body = saved
+    ? `${fromLabel}：\n「${saved.text}」`
     : 'アプリを開いてアラームを止めると、誰かとマッチングできます。';
 
   await Notifications.cancelAllScheduledNotificationsAsync();

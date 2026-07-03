@@ -3,22 +3,25 @@
 
 import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { loadTomorrowMessage } from '../lib/tomorrow-message';
+import { loadTomorrowMessageWithTime } from '../lib/tomorrow-message';
 
 export function TomorrowMessageView() {
-  const [message, setMessage] = useState('');
+  const [data, setData] = useState<{ text: string; timeLabel: string } | null>(null);
 
   useEffect(() => {
-    loadTomorrowMessage().then(setMessage);
+    loadTomorrowMessageWithTime().then(setData);
   }, []);
 
   // メッセージが無ければ何も出さない。
-  if (!message) return null;
+  if (!data) return null;
+
+  // 「昨日の◯◯のあなたから」。入力時刻が記録されていればその時刻を使う。
+  const fromLabel = data.timeLabel ? `昨日の${data.timeLabel}のあなたから` : '昨日のあなたから';
 
   return (
     <View style={styles.box}>
-      <Text style={styles.from}>昨日の23時のあなたから</Text>
-      <Text style={styles.text}>{message}</Text>
+      <Text style={styles.from}>{fromLabel}</Text>
+      <Text style={styles.text}>{data.text}</Text>
     </View>
   );
 }
