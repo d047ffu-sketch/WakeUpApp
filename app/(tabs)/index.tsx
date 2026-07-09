@@ -11,37 +11,39 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker, {
-  DateTimePickerAndroid,
-  type DateTimePickerEvent,
+    DateTimePickerAndroid,
+    type DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
 import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
-import { doc, getDoc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, increment, onSnapshot, updateDoc } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Platform,
-  StyleSheet,
-  Switch,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Platform,
+    StyleSheet,
+    Switch,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { db } from '../../firebase';
 import { useAuth } from '../../lib/auth-context';
 import { joinMatchingPool, leaveMatchingPool, tryMatch } from '../../lib/matching';
 import {
-  cancelAlarm,
-  scheduleDailyAlarm,
-  scheduleTestNotification,
-  setupNotifications,
+    cancelAlarm,
+    scheduleDailyAlarm,
+    scheduleTestNotification,
+    setupNotifications,
 } from '../../lib/notifications';
 
 // AsyncStorage に保存するときのキー名。
 const STORAGE_KEY_TIME = '@wakeupapp:alarmTime'; // "7:15" のような "時:分" 文字列
 const STORAGE_KEY_ENABLED = '@wakeupapp:alarmEnabled'; // "true" / "false"
+const ALARM_SETUP_REWARD = 10;
 
 // 画面の状態：通常 / アラーム鳴動中 / マッチング待機中
 type Status = 'idle' | 'ringing' | 'matching';
@@ -62,6 +64,8 @@ export default function HomeScreen() {
   const [alarmEnabled, setAlarmEnabled] = useState(true);
   const [showPicker, setShowPicker] = useState(false); // iOS で時刻ピッカーを表示中か
   const [status, setStatus] = useState<Status>('idle');
+  const [coinBalance, setCoinBalance] = useState(0);
+  const [stakeAmount, setStakeAmount] = useState('0');
 
   // 同じ時刻で何度も鳴らさないための「処理済み」記録（例: "Sun Jun 15 2026 7:15"）。
   const handledKeyRef = useRef<string | null>(null);
@@ -75,12 +79,29 @@ export default function HomeScreen() {
     }
   }, []);
 
+  const awardCoinsForAlarmSetup = useCallback(async () => {
+    if (!user) return;
+    try {
+      await updateDoc(doc(db, 'users', user.uid), {
+        coinBalance: increment(ALARM_SETUP_REWARD),
+        alarmSetDate: getDateKey(),
+      });
+      setCoinBalance((prev) => prev + ALARM_SETUP_REWARD);
+    } catch (e) {
+      console.warn('コイン付与に失敗', e);
+    }
+  }, [user]);
+
   // 画面表示時に、ニックネームと保存済みのアラーム設定を読み込む。
   useEffect(() => {
     if (!user) return;
     (async () => {
       const snap = await getDoc(doc(db, 'users', user.uid));
-      if (snap.exists()) setNickname(snap.data().nickname ?? '');
+      if (snap.exists()) {
+        const data = snap.data();
+        setNickname(data.nickname ?? '');
+        setCoinBalance(Number(data.coinBalance ?? 0));
+      }
 
       // 保存済みのアラーム時刻（無ければ初期値の7:00）。
       let loaded = new Date();
@@ -161,13 +182,14 @@ export default function HomeScreen() {
   }, [status, user, router]);
 
   // 時刻が選ばれたときの共通処理。15分刻みに丸めて保存する。
-  const onChangeTime = (event: DateTimePickerEvent, selectedDate?: Date) => {
+  const onChangeTime = async (event: DateTimePickerEvent, selectedDate?: Date) => {
     // 「決定」されたときだけ反映（×やキャンセルのときは event.type が 'dismissed'）。
     if (event.type === 'set' && selectedDate) {
       const rounded = roundToQuarter(selectedDate);
       setAlarmTime(rounded);
       AsyncStorage.setItem(STORAGE_KEY_TIME, `${rounded.getHours()}:${rounded.getMinutes()}`);
-      applyAlarmSchedule(alarmEnabled, rounded); // 新しい時刻で予約通知を入れ直す
+      await applyAlarmSchedule(alarmEnabled, rounded); // 新しい時刻で予約通知を入れ直す
+      await awardCoinsForAlarmSetup();
     }
   };
 
@@ -189,17 +211,39 @@ export default function HomeScreen() {
   };
 
   // アラーム ON/OFF を切り替えたとき。
-  const toggleEnabled = (value: boolean) => {
+  const toggleEnabled = async (value: boolean) => {
     setAlarmEnabled(value);
     AsyncStorage.setItem(STORAGE_KEY_ENABLED, value ? 'true' : 'false');
-    applyAlarmSchedule(value, alarmTime); // ONなら予約、OFFなら取り消し
+    await applyAlarmSchedule(value, alarmTime); // ONなら予約、OFFなら取り消し
+    if (value) {
+      await awardCoinsForAlarmSetup();
+    }
   };
 
   // 「アラームを止める」を押したとき。
   // アラームを止めて、そのままマッチング待機状態に入る（旧「マッチング開始」の機能）。
   const stopAlarmAndMatch = async () => {
     if (!user) return;
+
+    const parsedStake = Math.max(0, Number.parseInt(stakeAmount || '0', 10) || 0);
+    if (parsedStake > coinBalance) {
+      Alert.alert('コイン不足', '賭け額が現在のコイン残高を超えています。');
+      return;
+    }
+
+    let stakeApplied = false;
     try {
+      if (parsedStake > 0) {
+        await updateDoc(doc(db, 'users', user.uid), {
+          coinBalance: increment(-parsedStake),
+          pendingStake: parsedStake,
+          pendingStakeStatus: 'active',
+          pendingStakeRoomId: '',
+        });
+        setCoinBalance((prev) => prev - parsedStake);
+        stakeApplied = true;
+      }
+
       // 先にプール登録（currentRoomId も空にリセット）してから待機UIへ。
       // こうすることで、待機監視を始めた瞬間に古い部屋IDで誤遷移するのを防ぐ。
       await joinMatchingPool(user.uid);
@@ -208,6 +252,15 @@ export default function HomeScreen() {
       // （相手が後から来たら、相手側の処理でこちらの currentRoomId が入る）。
       await tryMatch(user.uid);
     } catch (e) {
+      if (stakeApplied && parsedStake > 0) {
+        await updateDoc(doc(db, 'users', user.uid), {
+          coinBalance: increment(parsedStake),
+          pendingStake: 0,
+          pendingStakeStatus: 'none',
+          pendingStakeRoomId: '',
+        });
+        setCoinBalance((prev) => prev + parsedStake);
+      }
       console.warn('マッチング開始に失敗', e);
       Alert.alert('エラー', 'マッチングの開始に失敗しました。通信環境を確認してください。');
       setStatus('idle');
@@ -217,7 +270,19 @@ export default function HomeScreen() {
   // 待機キャンセル。待機UIを閉じ、プールから自分を外す。
   const cancelMatching = async () => {
     setStatus('idle');
-    if (user) await leaveMatchingPool(user.uid);
+    if (user) {
+      const parsedStake = Math.max(0, Number.parseInt(stakeAmount || '0', 10) || 0);
+      if (parsedStake > 0) {
+        await updateDoc(doc(db, 'users', user.uid), {
+          coinBalance: increment(parsedStake),
+          pendingStake: 0,
+          pendingStakeStatus: 'none',
+          pendingStakeRoomId: '',
+        });
+        setCoinBalance((prev) => prev + parsedStake);
+      }
+      await leaveMatchingPool(user.uid);
+    }
   };
 
   // テスト用：実際の時刻を待たずに、すぐ鳴動状態にする（アプリ内の見た目だけ）。
@@ -267,6 +332,27 @@ export default function HomeScreen() {
       <View style={styles.inner}>
         {/* あいさつ */}
         <Text style={styles.greeting}>{greeting}、{nickname || 'あなた'} さん</Text>
+
+        <View style={styles.coinCard}>
+          <View style={styles.coinCardHeader}>
+            <Text style={styles.coinCardTitle}>コイン</Text>
+            <Text style={styles.coinBalanceText}>{coinBalance} コイン</Text>
+          </View>
+          <Text style={styles.coinHint}>目覚ましを設定すると{ALARM_SETUP_REWARD}コインがもらえます。</Text>
+          <TouchableOpacity style={styles.coinButton} onPress={() => router.push('/coin/coin')}>
+            <Text style={styles.coinButtonText}>コインの使い方を見る</Text>
+          </TouchableOpacity>
+          <View style={styles.stakeRow}>
+            <Text style={styles.stakeLabel}>寝る前の賭け額</Text>
+            <TextInput
+              style={styles.stakeInput}
+              value={stakeAmount}
+              onChangeText={(text) => setStakeAmount(text.replace(/\D/g, ''))}
+              keyboardType="numeric"
+              placeholder="0"
+            />
+          </View>
+        </View>
 
         {/* アラーム設定カード */}
         <View style={styles.card}>
@@ -365,6 +451,13 @@ function roundToQuarter(date: Date): Date {
   return d;
 }
 
+function getDateKey(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -380,6 +473,65 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#1D3D47',
     marginBottom: 24,
+  },
+  coinCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+  },
+  coinCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  coinCardTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1D3D47',
+  },
+  coinBalanceText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#F4B400',
+  },
+  coinHint: {
+    marginTop: 8,
+    color: '#666',
+    fontSize: 13,
+  },
+  coinButton: {
+    marginTop: 12,
+    alignSelf: 'flex-start',
+    backgroundColor: '#eef2f3',
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  coinButtonText: {
+    color: '#1D3D47',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  stakeRow: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  stakeLabel: {
+    fontSize: 14,
+    color: '#444',
+    flex: 1,
+  },
+  stakeInput: {
+    width: 90,
+    borderWidth: 1,
+    borderColor: '#d7dde0',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    textAlign: 'center',
   },
   card: {
     backgroundColor: '#fff',

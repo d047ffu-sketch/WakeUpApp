@@ -7,15 +7,15 @@ import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import { useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    KeyboardAvoidingView,
+    Platform,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { auth, db } from '../../firebase';
 
@@ -49,6 +49,10 @@ export default function RegisterScreen() {
         nickname: nickname.trim(),
         status: 'online', // online / matching / chatting のいずれか
         currentRoomId: '', // 現在いるチャット部屋のID（まだ無いので空）
+        coinBalance: 0,
+        pendingStake: 0,
+        pendingStakeStatus: 'none',
+        pendingStakeRoomId: '',
       });
 
       // 登録に成功するとログイン状態になり、_layout.tsx が自動でホームへ移動させる。

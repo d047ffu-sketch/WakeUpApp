@@ -6,28 +6,29 @@
 import { useHeaderHeight } from '@react-navigation/elements';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import {
-  addDoc,
-  collection,
-  doc,
-  getDoc,
-  getDocFromServer,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-  updateDoc,
+    addDoc,
+    collection,
+    doc,
+    getDoc,
+    getDocFromServer,
+    increment,
+    onSnapshot,
+    orderBy,
+    query,
+    serverTimestamp,
+    updateDoc,
 } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  FlatList,
-  KeyboardAvoidingView,
-  Platform,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    FlatList,
+    KeyboardAvoidingView,
+    Platform,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { db } from '../../firebase';
@@ -58,6 +59,7 @@ export default function ChatRoomScreen() {
   // 残り時間（ミリ秒）と、終了したかどうか。
   const [remainingMs, setRemainingMs] = useState<number | null>(null);
   const [ended, setEnded] = useState(false);
+  const [rewardClaimed, setRewardClaimed] = useState(false);
 
   // 今回の会話の開始時刻（5分カウントダウンの基準。サーバー時刻のミリ秒）。
   // 同じ相手と再マッチした場合は、その都度この時刻が更新される。
@@ -188,6 +190,32 @@ export default function ChatRoomScreen() {
     }
   };
 
+  // 起きていることを確認して、賭けたコインを倍額で戻す。
+  const handleConfirmAwake = async () => {
+    if (!user || rewardClaimed) return;
+    setRewardClaimed(true);
+
+    try {
+      const userSnap = await getDoc(doc(db, 'users', user.uid));
+      const data = userSnap.data() ?? {};
+      const pendingStake = Number(data.pendingStake ?? 0);
+      const pendingStakeStatus = data.pendingStakeStatus;
+      const roomStake = pendingStake > 0 && pendingStakeStatus === 'active' ? pendingStake : 0;
+      if (roomStake > 0) {
+        const todayKey = getDateKey();
+        await updateDoc(doc(db, 'users', user.uid), {
+          coinBalance: increment(roomStake * 2),
+          pendingStake: 0,
+          pendingStakeStatus: 'none',
+          pendingStakeRoomId: '',
+          wakeConfirmDate: todayKey,
+        });
+      }
+    } catch (e) {
+      console.warn('コイン報酬の付与に失敗', e);
+    }
+  };
+
   // ホームに戻る。
   const handleLeave = async () => {
     await resetStatusToOnline();
@@ -247,8 +275,14 @@ export default function ChatRoomScreen() {
         {ended ? (
           <View style={styles.endedBox}>
             <Text style={styles.endedText}>チャットが終了しました（5分経過）</Text>
-            <TouchableOpacity style={styles.endedButton} onPress={handleLeave}>
-              <Text style={styles.endedButtonText}>ホームに戻る</Text>
+            <Text style={styles.endedSubText}>
+              起きていることを確認すると、賭けたコインが倍額で戻ります。
+            </Text>
+            <TouchableOpacity style={styles.endedButton} onPress={handleConfirmAwake}>
+              <Text style={styles.endedButtonText}>起きている</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.leaveButton} onPress={handleLeave}>
+              <Text style={styles.leaveButtonText}>ホームに戻る</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -285,6 +319,13 @@ function formatRemaining(ms: number | null): string {
 // 残り1分未満か（警告色にするため）。
 function isUnderOneMinute(ms: number | null): boolean {
   return ms !== null && ms <= 60 * 1000;
+}
+
+function getDateKey(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 const styles = StyleSheet.create({
@@ -398,17 +439,36 @@ const styles = StyleSheet.create({
   endedText: {
     fontSize: 15,
     color: '#555',
+    marginBottom: 4,
+  },
+  endedSubText: {
+    fontSize: 13,
+    color: '#777',
     marginBottom: 12,
+    textAlign: 'center',
   },
   endedButton: {
     backgroundColor: '#1D3D47',
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 32,
+    marginBottom: 8,
   },
   endedButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  leaveButton: {
+    borderWidth: 1,
+    borderColor: '#1D3D47',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+  },
+  leaveButtonText: {
+    color: '#1D3D47',
+    fontSize: 15,
+    fontWeight: '600',
   },
 });
