@@ -77,6 +77,20 @@ export async function cancelAlarm(): Promise<void> {
   await Notifications.cancelAllScheduledNotificationsAsync();
 }
 
+// 「起きて！」を受け取った側が、自分の端末で今すぐ鳴らすローカル通知。
+// （相手のアプリが起動中／バックグラウンドで待ち受けているときだけ鳴る）
+export async function showWakeNotification(): Promise<void> {
+  if (isWeb) return;
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: '⏰ 早く起きてください！',
+      body: 'トーク相手はすでに起きています。',
+      sound: 'default',
+    },
+    trigger: null, // すぐに表示する
+  });
+}
+
 // テスト用：数秒後に1回だけ通知を出す（本物の通知が届くか確認するため）。
 export async function scheduleTestNotification(seconds = 5): Promise<void> {
   if (isWeb) return;
