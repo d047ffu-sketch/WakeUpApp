@@ -239,11 +239,28 @@ export default function HomeScreen() {
     AsyncStorage.setItem(STORAGE_KEY_ENABLED, value ? 'true' : 'false');
     applyAlarmSchedule(value, alarmTime); // ONなら予約、OFFなら取り消し
 
-    // OFF にしたら待機列から外す（オフの人はマッチ対象外にするため）。
-    // 再度ONにしたら参加し直せるよう、参加済みフラグもリセットする。
     if (!value && user) {
+      // OFF にしたら待機列から外す（オフの人はマッチ対象外）。再度ONで参加し直せるようリセット。
       removeFromPool(user.uid).catch(() => {});
       prematchKeyRef.current = null;
+      return;
+    }
+
+    // ON にしたとき、すでにマッチ窓（1時間前〜アラーム時刻）の中で、まだマッチしていなければ、
+    // その場ですぐ待機登録＋相手探しを行う（相手が待っていれば即マッチ成立する）。
+    if (value && user && !matchRoomId) {
+      const now = new Date();
+      const alarmToday = new Date();
+      alarmToday.setHours(alarmTime.getHours(), alarmTime.getMinutes(), 0, 0);
+      const minutesUntil = (alarmToday.getTime() - now.getTime()) / 60000;
+      if (minutesUntil > 0 && minutesUntil <= 60) {
+        const timeStr = formatTime(alarmTime);
+        prematchKeyRef.current = `${now.toDateString()} ${alarmTime.getHours()}:${alarmTime.getMinutes()}`;
+        lastTryMatchRef.current = Date.now();
+        joinMatchingPool(user.uid, timeStr)
+          .then(() => tryMatch(user.uid, timeStr))
+          .catch((e) => console.warn('マッチ試行失敗', e));
+      }
     }
   };
 
@@ -395,10 +412,16 @@ export default function HomeScreen() {
               <Text style={styles.hint}>
                 {formatTime(alarmTime)} のアラームで起きて、トークしましょう。
               </Text>
-              {/* テスト用：アラーム時刻を待たずに、手動で鳴らす */}
-              <TouchableOpacity onPress={testRing} style={styles.testLink}>
-                <Text style={styles.testLinkText}>（テスト）今すぐ鳴らす</Text>
-              </TouchableOpacity>
+              {/* テスト用：スマホは本物の通知を送る／web は画面内で鳴らす */}
+              {Platform.OS === 'web' ? (
+                <TouchableOpacity onPress={testRing} style={styles.testLink}>
+                  <Text style={styles.testLinkText}>（テスト）今すぐ鳴らす</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity onPress={handleTestNotification} style={styles.testLink}>
+                  <Text style={styles.testLinkText}>（テスト）通知を送る</Text>
+                </TouchableOpacity>
+              )}
             </View>
           ) : (
             // 通常
