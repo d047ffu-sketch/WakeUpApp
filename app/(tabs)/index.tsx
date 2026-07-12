@@ -66,8 +66,10 @@ export default function HomeScreen() {
 
   // 同じ時刻で何度も鳴らさないための「処理済み」記録（例: "Sun Jun 15 2026 7:15"）。
   const handledKeyRef = useRef<string | null>(null);
-  // 事前マッチをこの発生で試したか（1時間前の窓で1回だけ試すため）。
+  // この発生で待機列に登録済みか（1時間前の窓で1回だけ登録するため）。
   const prematchKeyRef = useRef<string | null>(null);
+  // 最後に相手探しを試みた時刻（数秒ごとに再試行するため）。
+  const lastTryMatchRef = useRef<number>(0);
   // 受け取った最後の「起きて！」の時刻（同じ合図で二重通知しないため）。
   const lastWakePingRef = useRef<number>(0);
 
@@ -134,13 +136,22 @@ export default function HomeScreen() {
       // この「日付＋時刻」の発生を一意に表すキー。
       const key = `${now.toDateString()} ${alarmTime.getHours()}:${alarmTime.getMinutes()}`;
 
-      // ① アラームの1時間前〜アラーム時刻の間なら、同時刻の相手と事前マッチを1回試す。
-      if (minutesUntil > 0 && minutesUntil <= 60 && !matchRoomId && prematchKeyRef.current !== key) {
-        prematchKeyRef.current = key;
+      // ① アラームの1時間前〜アラーム時刻の間、まだマッチしていなければ：
+      //    ・初回だけ待機列に登録する
+      //    ・その後は成立するまで数秒ごとに相手探しを再試行する
+      //      （2端末がほぼ同時にマッチ窓へ入っても「すれ違い」で取りこぼさないため）
+      if (minutesUntil > 0 && minutesUntil <= 60 && !matchRoomId) {
         const timeStr = formatTime(alarmTime);
-        joinMatchingPool(user.uid, timeStr)
-          .then(() => tryMatch(user.uid, timeStr))
-          .catch((e) => console.warn('事前マッチ失敗', e));
+        if (prematchKeyRef.current !== key) {
+          prematchKeyRef.current = key;
+          lastTryMatchRef.current = Date.now(); // 登録直後は少し待ってから探し始める
+          joinMatchingPool(user.uid, timeStr).catch((e) => console.warn('待機登録失敗', e));
+        }
+        // 2.5秒ごとに相手を探す。相手が待機列に来ていれば成立する。
+        if (Date.now() - lastTryMatchRef.current >= 2500) {
+          lastTryMatchRef.current = Date.now();
+          tryMatch(user.uid, timeStr).catch((e) => console.warn('マッチ試行失敗', e));
+        }
       }
 
       // ② アラーム時刻になったら鳴動状態にする（この発生でまだ鳴らしていなければ）。
