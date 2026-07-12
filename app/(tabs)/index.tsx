@@ -30,7 +30,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { db } from '../../firebase';
 import { useAuth } from '../../lib/auth-context';
-import { joinMatchingPool, markAwake, tryMatch } from '../../lib/matching';
+import { joinMatchingPool, markAwake, removeFromPool, tryMatch } from '../../lib/matching';
 import {
   cancelAlarm,
   scheduleDailyAlarm,
@@ -238,6 +238,13 @@ export default function HomeScreen() {
     setAlarmEnabled(value);
     AsyncStorage.setItem(STORAGE_KEY_ENABLED, value ? 'true' : 'false');
     applyAlarmSchedule(value, alarmTime); // ONなら予約、OFFなら取り消し
+
+    // OFF にしたら待機列から外す（オフの人はマッチ対象外にするため）。
+    // 再度ONにしたら参加し直せるよう、参加済みフラグもリセットする。
+    if (!value && user) {
+      removeFromPool(user.uid).catch(() => {});
+      prematchKeyRef.current = null;
+    }
   };
 
   // 「アラームを止める」を押したとき。
@@ -267,6 +274,11 @@ export default function HomeScreen() {
   // テスト用：1時間前を待たずに、今すぐ事前マッチを試す（同じアラーム時刻の相手と）。
   const testPrematch = async () => {
     if (!user) return;
+    // 実際の条件と合わせて、アラームがオンのときだけマッチできるようにする。
+    if (!alarmEnabled) {
+      Alert.alert('アラームがオフです', 'マッチングするにはアラームをオンにしてください。');
+      return;
+    }
     const timeStr = formatTime(alarmTime);
     try {
       await joinMatchingPool(user.uid, timeStr);

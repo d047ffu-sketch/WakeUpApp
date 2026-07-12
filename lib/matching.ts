@@ -22,6 +22,7 @@ import {
 import { db } from '../firebase';
 
 // 待機列に参加する。「同じアラーム時刻の人」を探すため alarmTime も保存する。
+// enabled はアラームがオンの人だけをマッチ対象にするための目印（登録時は必ずオン）。
 export async function joinMatchingPool(uid: string, alarmTime: string): Promise<void> {
   await updateDoc(doc(db, 'users', uid), {
     status: 'matching',
@@ -29,8 +30,14 @@ export async function joinMatchingPool(uid: string, alarmTime: string): Promise<
   });
   await setDoc(doc(db, 'matching_pool', uid), {
     alarmTime, // "7:00" のような時刻文字列
+    enabled: true, // アラームがオンの人だけがマッチ対象
     joinedAt: Date.now(),
   });
+}
+
+// 待機列から外す（アラームをオフにした時などに使う。ステータスは変えない）。
+export async function removeFromPool(uid: string): Promise<void> {
+  await deleteDoc(doc(db, 'matching_pool', uid)).catch(() => {});
 }
 
 // 同じアラーム時刻の相手を探してペアを作る。
@@ -38,14 +45,15 @@ export async function joinMatchingPool(uid: string, alarmTime: string): Promise<
 export async function tryMatch(uid: string, alarmTime: string): Promise<string | null> {
   for (let attempt = 0; attempt < 5; attempt++) {
     // 同じ alarmTime の待機者を取得（equality だけなので複合索引は不要）。
-    // 自分以外の中で、待機開始が一番早い人を相手候補にする。
+    // その中から「自分以外」かつ「アラームがオン(enabled)」の人だけを相手候補にし、
+    // 待機開始が一番早い人を選ぶ。← マッチ条件は「オン かつ 同じ時刻」。
     const poolSnap = await getDocs(
       query(collection(db, 'matching_pool'), where('alarmTime', '==', alarmTime)),
     );
     const candidates = poolSnap.docs
-      .filter((d) => d.id !== uid)
+      .filter((d) => d.id !== uid && d.data().enabled === true)
       .sort((a, b) => (a.data().joinedAt ?? 0) - (b.data().joinedAt ?? 0));
-    if (candidates.length === 0) return null; // 同時刻の相手がいない → 待機継続
+    if (candidates.length === 0) return null; // 同時刻でオンの相手がいない → 待機継続
     const partnerId = candidates[0].id;
 
     // 同じ2人なら必ず同じ部屋IDになるよう、UIDを並べ替えて連結する（履歴が残る）。
