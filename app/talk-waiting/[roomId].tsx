@@ -9,7 +9,7 @@ import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } fr
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { db } from '../../firebase';
 import { useAuth } from '../../lib/auth-context';
-import { sendWakePing } from '../../lib/matching';
+import { cancelMatch, sendWakePing } from '../../lib/matching';
 
 export default function TalkWaitingScreen() {
   const { roomId } = useLocalSearchParams<{ roomId: string }>();
@@ -58,6 +58,14 @@ export default function TalkWaitingScreen() {
     );
   };
 
+  // キャンセル（マッチをやめてホームに戻る）。二重遷移防止のためフラグを立てる。
+  const handleCancel = async () => {
+    if (navigatedRef.current) return;
+    navigatedRef.current = true;
+    if (user && roomId) await cancelMatch(user.uid, roomId);
+    router.back(); // ホーム（トーク待機を開いた元の画面）へ戻る
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.inner}>
@@ -75,6 +83,11 @@ export default function TalkWaitingScreen() {
             </TouchableOpacity>
           </>
         )}
+
+        {/* キャンセル（マッチをやめてホームに戻る） */}
+        <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
+          <Text style={styles.cancelButtonText}>キャンセル</Text>
+        </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
@@ -123,5 +136,18 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 26,
     fontWeight: 'bold',
+  },
+  cancelButton: {
+    marginTop: 48,
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#cfdde2',
+  },
+  cancelButtonText: {
+    color: '#cfdde2',
+    fontSize: 15,
+    fontWeight: '600',
   },
 });

@@ -126,3 +126,11 @@ export async function sendWakePing(roomId: string, targetUid: string): Promise<v
     wakePing: { to: targetUid, at: Date.now() },
   });
 }
+
+// マッチをやめる（トーク待機画面のキャンセル）。
+// 自分の起床フラグを下ろし（相手が誤ってトークへ進まないように）、
+// 自分のステータスを online に戻して、マッチ解除する。
+export async function cancelMatch(uid: string, roomId: string): Promise<void> {
+  await updateDoc(doc(db, 'rooms', roomId), { [`awake.${uid}`]: false }).catch(() => {});
+  await updateDoc(doc(db, 'users', uid), { status: 'online', currentRoomId: '' }).catch(() => {});
+}
