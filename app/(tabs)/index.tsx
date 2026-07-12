@@ -270,6 +270,16 @@ export default function HomeScreen() {
     }
   };
 
+  // 時刻を15分ずつ増減する（web でも確実に変更できる。ネイティブのピッカーが使えない場合の代替）。
+  const adjustAlarm = (deltaMinutes: number) => {
+    const d = new Date(alarmTime);
+    d.setMinutes(d.getMinutes() + deltaMinutes);
+    const rounded = roundToQuarter(d); // 15分刻みに保つ
+    setAlarmTime(rounded);
+    AsyncStorage.setItem(STORAGE_KEY_TIME, `${rounded.getHours()}:${rounded.getMinutes()}`);
+    applyAlarmSchedule(alarmEnabled, rounded); // 予約通知も入れ直す
+  };
+
   // テスト用：5秒後に本物の通知を出す（通知が実際に届くか確認するため）。
   const handleTestNotification = async () => {
     const granted = await setupNotifications();
@@ -303,9 +313,20 @@ export default function HomeScreen() {
             {formatTime(alarmTime)}
           </Text>
 
-          <TouchableOpacity style={styles.changeButton} onPress={openPicker}>
-            <Text style={styles.changeButtonText}>時刻を変更（15分刻み）</Text>
-          </TouchableOpacity>
+          {/* 時刻の変更：−15分／＋15分（どの端末でも動く）。ネイティブはピッカーも使える。 */}
+          <View style={styles.timeControls}>
+            <TouchableOpacity style={styles.adjustButton} onPress={() => adjustAlarm(-15)}>
+              <Text style={styles.adjustButtonText}>−15分</Text>
+            </TouchableOpacity>
+            {Platform.OS !== 'web' && (
+              <TouchableOpacity style={styles.changeButton} onPress={openPicker}>
+                <Text style={styles.changeButtonText}>時刻を選ぶ</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={styles.adjustButton} onPress={() => adjustAlarm(15)}>
+              <Text style={styles.adjustButtonText}>＋15分</Text>
+            </TouchableOpacity>
+          </View>
 
           {/* iOS 用のインラインピッカー＋「完了」ボタン */}
           {showPicker && Platform.OS === 'ios' && (
@@ -351,6 +372,10 @@ export default function HomeScreen() {
               <Text style={styles.hint}>
                 {formatTime(alarmTime)} のアラームで起きて、トークしましょう。
               </Text>
+              {/* テスト用：アラーム時刻を待たずに、手動で鳴らす */}
+              <TouchableOpacity onPress={testRing} style={styles.testLink}>
+                <Text style={styles.testLinkText}>（テスト）今すぐ鳴らす</Text>
+              </TouchableOpacity>
             </View>
           ) : (
             // 通常
@@ -447,12 +472,29 @@ const styles = StyleSheet.create({
   timeDisabled: {
     color: '#bbb',
   },
+  timeControls: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
+  adjustButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    backgroundColor: '#eef2f3',
+  },
+  adjustButtonText: {
+    color: '#1D3D47',
+    fontSize: 15,
+    fontWeight: '700',
+  },
   changeButton: {
     alignSelf: 'center',
     paddingVertical: 8,
     paddingHorizontal: 20,
     borderRadius: 20,
-    backgroundColor: '#eef2f3',
+    backgroundColor: '#dfe7e9',
   },
   changeButtonText: {
     color: '#1D3D47',
