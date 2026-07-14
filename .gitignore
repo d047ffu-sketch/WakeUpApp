@@ -43,3 +43,12 @@ app-example
 /android
 
 .env
+
+# Claude Code のローカル設定
+.claude/settings.local.json
+
+# 生成物（スライド・PDF）とその生成スクリプト
+WakeUpApp_Presentation.pptx
+WakeUpApp_ファイル一覧.pdf
+scripts/generate-slides.js
+scripts/generate-pdf.js
