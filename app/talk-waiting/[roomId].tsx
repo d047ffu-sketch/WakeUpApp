@@ -63,7 +63,7 @@ export default function TalkWaitingScreen() {
     if (navigatedRef.current) return;
     navigatedRef.current = true;
     if (user && roomId) await cancelMatch(user.uid, roomId);
-    router.back(); // ホーム（トーク待機を開いた元の画面）へ戻る
+    router.replace('/calender/calender');
   };
 
   return (

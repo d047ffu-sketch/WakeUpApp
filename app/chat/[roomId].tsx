@@ -6,28 +6,28 @@
 import { useHeaderHeight } from '@react-navigation/elements';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import {
-  addDoc,
-  collection,
-  doc,
-  getDoc,
-  getDocFromServer,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-  updateDoc,
+    addDoc,
+    collection,
+    doc,
+    getDoc,
+    getDocFromServer,
+    onSnapshot,
+    orderBy,
+    query,
+    serverTimestamp,
+    updateDoc,
 } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  FlatList,
-  KeyboardAvoidingView,
-  Platform,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    FlatList,
+    KeyboardAvoidingView,
+    Platform,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { db } from '../../firebase';
@@ -188,10 +188,18 @@ export default function ChatRoomScreen() {
     }
   };
 
-  // ホームに戻る。
+  useEffect(() => {
+    if (!ended) return;
+    const timer = setTimeout(() => {
+      router.replace('/calender/calender');
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [ended, router]);
+
+  // カレンダーに戻る。
   const handleLeave = async () => {
     await resetStatusToOnline();
-    router.back();
+    router.replace('/calender/calender');
   };
 
   if (loading) {

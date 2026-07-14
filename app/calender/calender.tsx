@@ -2,10 +2,12 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Alert,
+    Animated,
     Modal,
+    PanResponder,
     ScrollView,
     StyleSheet,
     Text,
@@ -78,10 +80,92 @@ function buildMonthDays(anchorDate: string): (string | null)[] {
   return days;
 }
 
+function shiftMonth(value: string, delta: number): string {
+  const date = parseDateKey(value);
+  date.setMonth(date.getMonth() + delta, 1);
+  return toDateKey(date);
+}
+
+function formatMonthLabel(value: string): string {
+  const date = parseDateKey(value);
+  return `${date.getFullYear()}年${date.getMonth() + 1}月`;
+}
+
+type TodoSwipeRowProps = {
+  todo: TodoItem;
+  onToggle: (id: string) => void;
+  onDelete: (id: string) => void;
+  onEditStart: (field: 'startDate' | 'endDate', todoId: string) => void;
+};
+
+function TodoSwipeRow({ todo, onToggle, onDelete, onEditStart }: TodoSwipeRowProps) {
+  const translateX = useRef(new Animated.Value(0)).current;
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > 10,
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dx < 0) {
+          translateX.setValue(Math.max(-96, gestureState.dx));
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dx < -80) {
+          Animated.timing(translateX, {
+            toValue: -96,
+            duration: 140,
+            useNativeDriver: true,
+          }).start(() => onDelete(todo.id));
+        } else {
+          Animated.spring(translateX, {
+            toValue: 0,
+            tension: 70,
+            friction: 10,
+            useNativeDriver: true,
+          }).start();
+        }
+      },
+    }),
+  ).current;
+
+  return (
+    <View style={styles.swipeRowContainer}>
+      <Animated.View
+        {...panResponder.panHandlers}
+        style={[styles.todoRow, { transform: [{ translateX }] }]}>
+        <TouchableOpacity
+          style={[styles.checkbox, todo.completed && styles.checkboxDone]}
+          onPress={() => onToggle(todo.id)}>
+          {todo.completed ? <Ionicons name="checkmark" size={14} color="#fff" /> : null}
+        </TouchableOpacity>
+        <View style={styles.todoTextWrap}>
+          <Text style={[styles.todoTitle, todo.completed && styles.todoTitleDone]}>{todo.title}</Text>
+          <View style={styles.dateEditRow}>
+            <TouchableOpacity
+              style={styles.dateEditButton}
+              onPress={() => onEditStart('startDate', todo.id)}>
+              <Text style={styles.dateEditLabel}>開始</Text>
+              <Text style={styles.dateEditValue}>{formatDisplayDate(todo.startDate)}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.dateEditButton}
+              onPress={() => onEditStart('endDate', todo.id)}>
+              <Text style={styles.dateEditLabel}>終了</Text>
+              <Text style={styles.dateEditValue}>{formatDisplayDate(todo.endDate)}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Animated.View>
+    </View>
+  );
+}
+
 export default function CalendarScreen() {
   const router = useRouter();
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [selectedDate, setSelectedDate] = useState(() => toDateKey(new Date()));
+  const [viewMonth, setViewMonth] = useState(() => toDateKey(new Date()));
   const [draftTitle, setDraftTitle] = useState('');
   const [startDate, setStartDate] = useState(() => toDateKey(new Date()));
   const [endDate, setEndDate] = useState(() => toDateKey(new Date()));
@@ -144,9 +228,9 @@ export default function CalendarScreen() {
     }, [loadTodos, loadWakeData]),
   );
 
-  const monthDays = useMemo(() => buildMonthDays(selectedDate), [selectedDate]);
+  const monthDays = useMemo(() => buildMonthDays(viewMonth), [viewMonth]);
   const todayKey = toDateKey(new Date());
-  const isSelectedDateMissed = selectedDate < todayKey && !wakeDates.includes(selectedDate);
+  const monthLabel = useMemo(() => formatMonthLabel(viewMonth), [viewMonth]);
   const visibleTodos = useMemo(
     () => todos.filter((todo) => isTaskOnDate(todo, selectedDate)),
     [selectedDate, todos],
@@ -163,6 +247,12 @@ export default function CalendarScreen() {
     });
     return grouped;
   }, [visibleTodos]);
+
+  const deleteTodo = async (id: string) => {
+    const nextTodos = todos.filter((todo) => todo.id !== id);
+    setTodos(nextTodos);
+    await saveTodos(nextTodos);
+  };
 
   const handleAddTodo = async () => {
     const title = draftTitle.trim();
@@ -188,6 +278,7 @@ export default function CalendarScreen() {
     await saveTodos(nextTodos);
     setDraftTitle('');
     setSelectedDate(startDate);
+    setViewMonth(startDate);
     setStartDate(startDate);
     setEndDate(endDate);
   };
@@ -264,19 +355,24 @@ export default function CalendarScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Text style={styles.cardTitle}>予定を見る</Text>
-            <TouchableOpacity
-              onPress={() => {
-                if (!isSelectedDateMissed) {
-                  setIsCalendarExpanded(true);
-                }
-              }}>
-              <Text style={[styles.cardCaption, isSelectedDateMissed && styles.cardCaptionDisabled]}>拡大</Text>
+            <TouchableOpacity onPress={() => setIsCalendarExpanded(true)}>
+              <Text style={styles.cardCaption}>拡大</Text>
             </TouchableOpacity>
           </View>
 
           <View style={styles.streakBanner}>
             <Text style={styles.streakLabel}>連続起床</Text>
             <Text style={styles.streakValue}>{streakCount}日</Text>
+          </View>
+
+          <View style={styles.monthNav}>
+            <TouchableOpacity onPress={() => setViewMonth(shiftMonth(viewMonth, -1))}>
+              <Ionicons name="chevron-back" size={20} color="#1D3D47" />
+            </TouchableOpacity>
+            <Text style={styles.monthLabel}>{monthLabel}</Text>
+            <TouchableOpacity onPress={() => setViewMonth(shiftMonth(viewMonth, 1))}>
+              <Ionicons name="chevron-forward" size={20} color="#1D3D47" />
+            </TouchableOpacity>
           </View>
 
           <View style={styles.weekRow}>
@@ -308,10 +404,8 @@ export default function CalendarScreen() {
                     isMissed && styles.dayCellMissed,
                   ]}
                   onPress={() => {
-                    if (isMissed) {
-                      return;
-                    }
                     setSelectedDate(dayKey);
+                    setViewMonth(dayKey);
                     setIsCalendarExpanded(true);
                   }}>
                   <Text
@@ -344,95 +438,65 @@ export default function CalendarScreen() {
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Todo を追加</Text>
-          {isSelectedDateMissed ? (
-            <Text style={styles.lockedNotice}>この日は Todo を設定できません。</Text>
-          ) : (
-            <>
-              <TextInput
-                style={styles.input}
-                value={draftTitle}
-                onChangeText={setDraftTitle}
-                placeholder="例：朝の散歩"
-                placeholderTextColor="#97A4A8"
-              />
+          <TextInput
+            style={styles.input}
+            value={draftTitle}
+            onChangeText={setDraftTitle}
+            placeholder="例：朝の散歩"
+            placeholderTextColor="#97A4A8"
+          />
 
-              <View style={styles.dateRow}>
-                <TouchableOpacity style={styles.dateButton} onPress={() => setDatePickerTarget('start')}>
-                  <Text style={styles.dateButtonLabel}>開始日</Text>
-                  <Text style={styles.dateButtonValue}>{formatDisplayDate(startDate)}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.dateButton} onPress={() => setDatePickerTarget('end')}>
-                  <Text style={styles.dateButtonLabel}>終了日</Text>
-                  <Text style={styles.dateButtonValue}>{formatDisplayDate(endDate)}</Text>
-                </TouchableOpacity>
-              </View>
+          <View style={styles.dateRow}>
+            <TouchableOpacity style={styles.dateButton} onPress={() => setDatePickerTarget('start')}>
+              <Text style={styles.dateButtonLabel}>開始日</Text>
+              <Text style={styles.dateButtonValue}>{formatDisplayDate(startDate)}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.dateButton} onPress={() => setDatePickerTarget('end')}>
+              <Text style={styles.dateButtonLabel}>終了日</Text>
+              <Text style={styles.dateButtonValue}>{formatDisplayDate(endDate)}</Text>
+            </TouchableOpacity>
+          </View>
 
-              {datePickerTarget || editingTodoDate ? (
-                <DateTimePicker
-                  value={
-                    editingTodoDate
-                      ? parseDateKey(
-                          todos.find((todo) => todo.id === editingTodoDate.todoId)?.[
-                            editingTodoDate.field
-                          ] ?? startDate,
-                        )
-                      : parseDateKey(datePickerTarget === 'start' ? startDate : endDate)
-                  }
-                  mode="date"
-                  display="default"
-                  onChange={onDateChange}
-                />
-              ) : null}
+          {datePickerTarget || editingTodoDate ? (
+            <DateTimePicker
+              value={
+                editingTodoDate
+                  ? parseDateKey(
+                      todos.find((todo) => todo.id === editingTodoDate.todoId)?.[
+                        editingTodoDate.field
+                      ] ?? startDate,
+                    )
+                  : parseDateKey(datePickerTarget === 'start' ? startDate : endDate)
+              }
+              mode="date"
+              display="default"
+              onChange={onDateChange}
+            />
+          ) : null}
 
-              <TouchableOpacity style={styles.addButton} onPress={() => void handleAddTodo()}>
-                <Text style={styles.addButtonText}>Todo を追加</Text>
-              </TouchableOpacity>
-            </>
-          )}
+          <TouchableOpacity style={styles.addButton} onPress={() => void handleAddTodo()}>
+            <Text style={styles.addButtonText}>Todo を追加</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>{formatDisplayDate(selectedDate)} の Todo</Text>
-          {isSelectedDateMissed ? (
-            <Text style={styles.lockedNotice}>この日には Todo を表示できません。</Text>
-          ) : visibleTodos.length === 0 ? (
+          {visibleTodos.length === 0 ? (
             <Text style={styles.emptyText}>この日に入っている Todo はまだありません。</Text>
           ) : (
             groupedTodos.map((group, groupIndex) => (
               <View key={`group-${groupIndex}`} style={styles.todoGroup}>
                 {group.map((todo) => (
-                  <View key={todo.id} style={styles.todoRow}>
-                    <TouchableOpacity
-                      style={[styles.checkbox, todo.completed && styles.checkboxDone]}
-                      onPress={() => void toggleTodo(todo.id)}>
-                      {todo.completed ? <Ionicons name="checkmark" size={14} color="#fff" /> : null}
-                    </TouchableOpacity>
-                    <View style={styles.todoTextWrap}>
-                      <Text style={[styles.todoTitle, todo.completed && styles.todoTitleDone]}>
-                        {todo.title}
-                      </Text>
-                      <View style={styles.dateEditRow}>
-                        <TouchableOpacity
-                          style={styles.dateEditButton}
-                          onPress={() => {
-                            setEditingTodoDate({ todoId: todo.id, field: 'startDate' });
-                            setDatePickerTarget(null);
-                          }}>
-                          <Text style={styles.dateEditLabel}>開始</Text>
-                          <Text style={styles.dateEditValue}>{formatDisplayDate(todo.startDate)}</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={styles.dateEditButton}
-                          onPress={() => {
-                            setEditingTodoDate({ todoId: todo.id, field: 'endDate' });
-                            setDatePickerTarget(null);
-                          }}>
-                          <Text style={styles.dateEditLabel}>終了</Text>
-                          <Text style={styles.dateEditValue}>{formatDisplayDate(todo.endDate)}</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  </View>
+                  <TodoSwipeRow
+                    key={todo.id}
+                    todo={todo}
+                    onToggle={() => void toggleTodo(todo.id)}
+                    onDelete={() => void deleteTodo(todo.id)}
+                    onEditStart={(field, todoId) => {
+                      setEditingTodoDate({ todoId, field });
+                      setDatePickerTarget(null);
+                    }}
+                  />
                 ))}
               </View>
             ))
@@ -531,9 +595,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6B7A80',
   },
-  cardCaptionDisabled: {
-    color: '#9aa4a8',
-  },
   streakBanner: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -553,6 +614,18 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: '800',
+  },
+  monthNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+    paddingHorizontal: 4,
+  },
+  monthLabel: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#1D3D47',
   },
   weekRow: {
     flexDirection: 'row',
@@ -663,11 +736,9 @@ const styles = StyleSheet.create({
     color: '#7b8a8f',
     fontSize: 13,
   },
-  lockedNotice: {
-    marginTop: 8,
-    color: '#8b8b8b',
-    fontSize: 13,
-    fontWeight: '600',
+  swipeRowContainer: {
+    position: 'relative',
+    marginBottom: 8,
   },
   todoGroup: {
     borderTopWidth: 1,
