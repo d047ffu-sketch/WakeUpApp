@@ -9,6 +9,7 @@
 // アラーム時刻には expo-notifications で「予約ローカル通知」を出す（Phase 5）。
 // 設定の ON/OFF・時刻変更に合わせて、予約通知を入れ直す/取り消す。
 
+import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker, {
   DateTimePickerAndroid,
@@ -25,7 +26,7 @@ import {
   Switch,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { db } from '../../firebase';
@@ -42,6 +43,21 @@ import {
 // AsyncStorage に保存するときのキー名。
 const STORAGE_KEY_TIME = '@wakeupapp:alarmTime'; // "7:15" のような "時:分" 文字列
 const STORAGE_KEY_ENABLED = '@wakeupapp:alarmEnabled'; // "true" / "false"
+const STORAGE_KEY_STREAK = '@wakeupapp:alarmStreak';
+const STORAGE_KEY_STREAK_DATE = '@wakeupapp:alarmStreakDate';
+const STORAGE_KEY_WAKE_DATES = '@wakeupapp:wakeDates';
+
+type AlarmStreak = {
+  count: number;
+  lastDate: string | null;
+};
+
+function toDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 export default function HomeScreen() {
   const { user } = useAuth();
@@ -58,6 +74,7 @@ export default function HomeScreen() {
   });
   const [alarmEnabled, setAlarmEnabled] = useState(true);
   const [showPicker, setShowPicker] = useState(false); // iOS で時刻ピッカーを表示中か
+  const [alarmStreak, setAlarmStreak] = useState<AlarmStreak>({ count: 0, lastDate: null });
 
   // アラームが鳴っているか。
   const [ringing, setRinging] = useState(false);
@@ -83,6 +100,16 @@ export default function HomeScreen() {
   }, []);
 
   // 画面表示時に、ニックネームと保存済みのアラーム設定を読み込む。
+  useEffect(() => {
+    (async () => {
+      const savedStreak = await AsyncStorage.getItem(STORAGE_KEY_STREAK);
+      const savedDate = await AsyncStorage.getItem(STORAGE_KEY_STREAK_DATE);
+      if (savedStreak) {
+        setAlarmStreak({ count: Number(savedStreak), lastDate: savedDate });
+      }
+    })();
+  }, []);
+
   useEffect(() => {
     if (!user) return;
     (async () => {
@@ -266,8 +293,42 @@ export default function HomeScreen() {
 
   // 「アラームを止める」を押したとき。
   // 自分の起床を記録し、トーク待機画面へ移動する（相手も起きたらトークルームへ）。
+  const recordAlarmStop = useCallback(async () => {
+    const todayKey = toDateKey(new Date());
+    const previousDate = alarmStreak.lastDate;
+
+    const storedWakeDates = await AsyncStorage.getItem(STORAGE_KEY_WAKE_DATES);
+    const wakeDates = storedWakeDates ? (JSON.parse(storedWakeDates) as string[]) : [];
+    if (!wakeDates.includes(todayKey)) {
+      wakeDates.push(todayKey);
+      await AsyncStorage.setItem(STORAGE_KEY_WAKE_DATES, JSON.stringify(wakeDates));
+    }
+
+    if (previousDate === todayKey) {
+      return;
+    }
+
+    let nextCount = 1;
+    if (previousDate) {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayKey = toDateKey(yesterday);
+      nextCount = previousDate === yesterdayKey ? alarmStreak.count + 1 : 1;
+    }
+
+    const updated = {
+      count: nextCount,
+      lastDate: todayKey,
+    };
+
+    setAlarmStreak(updated);
+    await AsyncStorage.setItem(STORAGE_KEY_STREAK, String(updated.count));
+    await AsyncStorage.setItem(STORAGE_KEY_STREAK_DATE, updated.lastDate);
+  }, [alarmStreak.count, alarmStreak.lastDate]);
+
   const handleStopAlarm = async () => {
     setRinging(false);
+    await recordAlarmStop();
     if (!user) return;
     if (!matchRoomId) {
       // 事前マッチしていない場合はアラームを止めるだけ。
@@ -338,8 +399,12 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.inner}>
-        {/* あいさつ */}
-        <Text style={styles.greeting}>{greeting}、{nickname || 'あなた'} さん</Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.greeting}>{greeting}、{nickname || 'あなた'} さん</Text>
+          <TouchableOpacity style={styles.calendarButton} onPress={() => router.push('/calender/calender')}>
+            <Ionicons name="calendar-outline" size={22} color="#1D3D47" />
+          </TouchableOpacity>
+        </View>
 
         {/* アラーム設定カード */}
         <View style={styles.card}>
@@ -487,11 +552,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 16,
   },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+  },
   greeting: {
     fontSize: 22,
     fontWeight: 'bold',
     color: '#1D3D47',
-    marginBottom: 24,
+    flex: 1,
+  },
+  calendarButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   card: {
     backgroundColor: '#fff',
