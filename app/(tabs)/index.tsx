@@ -19,7 +19,6 @@ import { useRouter } from 'expo-router';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   Platform,
   StyleSheet,
@@ -31,20 +30,18 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { db } from '../../firebase';
 import { useAuth } from '../../lib/auth-context';
-import { joinMatchingPool, leaveMatchingPool, tryMatch } from '../../lib/matching';
+import { joinMatchingPool, markAwake, removeFromPool, tryMatch } from '../../lib/matching';
 import {
   cancelAlarm,
   scheduleDailyAlarm,
   scheduleTestNotification,
   setupNotifications,
+  showWakeNotification,
 } from '../../lib/notifications';
 
 // AsyncStorage に保存するときのキー名。
 const STORAGE_KEY_TIME = '@wakeupapp:alarmTime'; // "7:15" のような "時:分" 文字列
 const STORAGE_KEY_ENABLED = '@wakeupapp:alarmEnabled'; // "true" / "false"
-
-// 画面の状態：通常 / アラーム鳴動中 / マッチング待機中
-type Status = 'idle' | 'ringing' | 'matching';
 
 export default function HomeScreen() {
   const { user } = useAuth();
@@ -61,10 +58,20 @@ export default function HomeScreen() {
   });
   const [alarmEnabled, setAlarmEnabled] = useState(true);
   const [showPicker, setShowPicker] = useState(false); // iOS で時刻ピッカーを表示中か
-  const [status, setStatus] = useState<Status>('idle');
+
+  // アラームが鳴っているか。
+  const [ringing, setRinging] = useState(false);
+  // 事前マッチ済みの部屋ID（相手が決まっている）。null ならまだ相手なし。
+  const [matchRoomId, setMatchRoomId] = useState<string | null>(null);
 
   // 同じ時刻で何度も鳴らさないための「処理済み」記録（例: "Sun Jun 15 2026 7:15"）。
   const handledKeyRef = useRef<string | null>(null);
+  // この発生で待機列に登録済みか（1時間前の窓で1回だけ登録するため）。
+  const prematchKeyRef = useRef<string | null>(null);
+  // 最後に相手探しを試みた時刻（数秒ごとに再試行するため）。
+  const lastTryMatchRef = useRef<number>(0);
+  // 受け取った最後の「起きて！」の時刻（同じ合図で二重通知しないため）。
+  const lastWakePingRef = useRef<number>(0);
 
   // アラームの予約通知を、現在の設定（ON/OFF・時刻）に合わせてセットし直す。
   const applyAlarmSchedule = useCallback(async (enabled: boolean, date: Date) => {
@@ -109,34 +116,55 @@ export default function HomeScreen() {
   useEffect(() => {
     if (Platform.OS === 'web') return;
     const sub = Notifications.addNotificationResponseReceivedListener(() => {
-      setStatus((prev) => (prev === 'matching' ? prev : 'ringing'));
+      setRinging(true);
     });
     return () => sub.remove();
   }, []);
 
-  // 1秒ごとに「今がアラーム時刻か」をチェックし、時刻になったら鳴動状態にする。
+  // 1秒ごとに時刻をチェックし、①1時間前になったら事前マッチ ②アラーム時刻になったら鳴動。
   useEffect(() => {
+    if (!user) return;
     const id = setInterval(() => {
       if (!alarmEnabled) return;
       const now = new Date();
+
+      // 今日のアラーム時刻（時:分）までの残り分数を計算する。
+      const alarmToday = new Date();
+      alarmToday.setHours(alarmTime.getHours(), alarmTime.getMinutes(), 0, 0);
+      const minutesUntil = (alarmToday.getTime() - now.getTime()) / 60000;
+
+      // この「日付＋時刻」の発生を一意に表すキー。
+      const key = `${now.toDateString()} ${alarmTime.getHours()}:${alarmTime.getMinutes()}`;
+
+      // ① アラームの1時間前〜アラーム時刻の間、まだマッチしていなければ：
+      //    ・初回だけ待機列に登録する
+      //    ・その後は成立するまで数秒ごとに相手探しを再試行する
+      //      （2端末がほぼ同時にマッチ窓へ入っても「すれ違い」で取りこぼさないため）
+      if (minutesUntil > 0 && minutesUntil <= 60 && !matchRoomId) {
+        const timeStr = formatTime(alarmTime);
+        if (prematchKeyRef.current !== key) {
+          prematchKeyRef.current = key;
+          lastTryMatchRef.current = Date.now(); // 登録直後は少し待ってから探し始める
+          joinMatchingPool(user.uid, timeStr).catch((e) => console.warn('待機登録失敗', e));
+        }
+        // 2.5秒ごとに相手を探す。相手が待機列に来ていれば成立する。
+        if (Date.now() - lastTryMatchRef.current >= 2500) {
+          lastTryMatchRef.current = Date.now();
+          tryMatch(user.uid, timeStr).catch((e) => console.warn('マッチ試行失敗', e));
+        }
+      }
+
+      // ② アラーム時刻になったら鳴動状態にする（この発生でまだ鳴らしていなければ）。
       const sameTime =
         now.getHours() === alarmTime.getHours() &&
         now.getMinutes() === alarmTime.getMinutes();
-      if (!sameTime) return;
-
-      // この「日付＋時刻」の発生を一意に表すキー（1分間に何度も鳴らさないため）。
-      const key = `${now.toDateString()} ${alarmTime.getHours()}:${alarmTime.getMinutes()}`;
-      setStatus((prev) => {
-        // 通常状態のときだけ、かつこの発生をまだ処理していなければ鳴らす。
-        if (prev === 'idle' && handledKeyRef.current !== key) {
-          handledKeyRef.current = key;
-          return 'ringing';
-        }
-        return prev;
-      });
+      if (sameTime && handledKeyRef.current !== key) {
+        handledKeyRef.current = key;
+        setRinging(true);
+      }
     }, 1000);
     return () => clearInterval(id);
-  }, [alarmEnabled, alarmTime]);
+  }, [alarmEnabled, alarmTime, matchRoomId, user]);
 
   // 1分ごとにあいさつを今の時間帯に合わせ直す（アプリを開きっぱなしでも切り替わるように）。
   // 値が変わらないときは React が再描画を省くので無駄な処理にはならない。
@@ -145,20 +173,37 @@ export default function HomeScreen() {
     return () => clearInterval(id);
   }, []);
 
-  // マッチング待機中だけ、自分の users を監視する。
-  // 相手とペアが成立すると currentRoomId が入るので、それを検知してチャット画面へ遷移する。
+  // 自分の users を常に監視し、事前マッチが成立したら matchRoomId を得る。
   useEffect(() => {
-    if (status !== 'matching' || !user) return;
+    if (!user) return;
     const unsubscribe = onSnapshot(doc(db, 'users', user.uid), (snap) => {
       const roomId = snap.data()?.currentRoomId;
-      if (roomId) {
-        setStatus('idle'); // 待機状態を解除
-        // まずマッチング成功画面へ。その画面が3秒後にトーク画面へ移動する。
-        router.push({ pathname: '/match/[roomId]', params: { roomId } });
+      setMatchRoomId(roomId ? roomId : null);
+    });
+    return () => unsubscribe();
+  }, [user]);
+
+  // マッチ済みの部屋を監視し、「起きて！」の合図が自分宛てに来たら通知を鳴らす。
+  useEffect(() => {
+    if (!user || !matchRoomId) return;
+    const unsubscribe = onSnapshot(doc(db, 'rooms', matchRoomId), (snap) => {
+      if (!snap.exists()) return;
+      const ping = snap.data().wakePing;
+      // 自分宛て かつ 新しい合図（2分以内）だけ通知する。
+      if (
+        ping &&
+        ping.to === user.uid &&
+        ping.at > lastWakePingRef.current &&
+        Date.now() - ping.at < 120000
+      ) {
+        lastWakePingRef.current = ping.at;
+        setRinging(true); // 起こすために鳴動状態にする
+        showWakeNotification(); // 端末に通知を出す
+        Alert.alert('起きて！', '早く起きてください。トーク相手はすでに起きています。');
       }
     });
     return () => unsubscribe();
-  }, [status, user, router]);
+  }, [user, matchRoomId]);
 
   // 時刻が選ばれたときの共通処理。15分刻みに丸めて保存する。
   const onChangeTime = (event: DateTimePickerEvent, selectedDate?: Date) => {
@@ -193,36 +238,86 @@ export default function HomeScreen() {
     setAlarmEnabled(value);
     AsyncStorage.setItem(STORAGE_KEY_ENABLED, value ? 'true' : 'false');
     applyAlarmSchedule(value, alarmTime); // ONなら予約、OFFなら取り消し
-  };
 
-  // 「アラームを止める」を押したとき。
-  // アラームを止めて、そのままマッチング待機状態に入る（旧「マッチング開始」の機能）。
-  const stopAlarmAndMatch = async () => {
-    if (!user) return;
-    try {
-      // 先にプール登録（currentRoomId も空にリセット）してから待機UIへ。
-      // こうすることで、待機監視を始めた瞬間に古い部屋IDで誤遷移するのを防ぐ。
-      await joinMatchingPool(user.uid);
-      setStatus('matching');
-      // すでに待機中の相手がいればこの場でペア成立。いなければ待機を続ける
-      // （相手が後から来たら、相手側の処理でこちらの currentRoomId が入る）。
-      await tryMatch(user.uid);
-    } catch (e) {
-      console.warn('マッチング開始に失敗', e);
-      Alert.alert('エラー', 'マッチングの開始に失敗しました。通信環境を確認してください。');
-      setStatus('idle');
+    if (!value && user) {
+      // OFF にしたら待機列から外す（オフの人はマッチ対象外）。再度ONで参加し直せるようリセット。
+      removeFromPool(user.uid).catch(() => {});
+      prematchKeyRef.current = null;
+      return;
+    }
+
+    // ON にしたとき、すでにマッチ窓（1時間前〜アラーム時刻）の中で、まだマッチしていなければ、
+    // その場ですぐ待機登録＋相手探しを行う（相手が待っていれば即マッチ成立する）。
+    if (value && user && !matchRoomId) {
+      const now = new Date();
+      const alarmToday = new Date();
+      alarmToday.setHours(alarmTime.getHours(), alarmTime.getMinutes(), 0, 0);
+      const minutesUntil = (alarmToday.getTime() - now.getTime()) / 60000;
+      if (minutesUntil > 0 && minutesUntil <= 60) {
+        const timeStr = formatTime(alarmTime);
+        prematchKeyRef.current = `${now.toDateString()} ${alarmTime.getHours()}:${alarmTime.getMinutes()}`;
+        lastTryMatchRef.current = Date.now();
+        joinMatchingPool(user.uid, timeStr)
+          .then(() => tryMatch(user.uid, timeStr))
+          .catch((e) => console.warn('マッチ試行失敗', e));
+      }
     }
   };
 
-  // 待機キャンセル。待機UIを閉じ、プールから自分を外す。
-  const cancelMatching = async () => {
-    setStatus('idle');
-    if (user) await leaveMatchingPool(user.uid);
+  // 「アラームを止める」を押したとき。
+  // 自分の起床を記録し、トーク待機画面へ移動する（相手も起きたらトークルームへ）。
+  const handleStopAlarm = async () => {
+    setRinging(false);
+    if (!user) return;
+    if (!matchRoomId) {
+      // 事前マッチしていない場合はアラームを止めるだけ。
+      Alert.alert('おはようございます', '今回はトーク相手が見つかりませんでした。');
+      return;
+    }
+    try {
+      await markAwake(user.uid, matchRoomId);
+      router.push({ pathname: '/talk-waiting/[roomId]', params: { roomId: matchRoomId } });
+    } catch (e) {
+      console.warn('起床の記録に失敗', e);
+      Alert.alert('エラー', '通信環境を確認してください。');
+    }
   };
 
-  // テスト用：実際の時刻を待たずに、すぐ鳴動状態にする（アプリ内の見た目だけ）。
+  // テスト用：実際の時刻を待たずに、すぐ鳴動状態にする。
   const testRing = () => {
-    setStatus('ringing');
+    setRinging(true);
+  };
+
+  // テスト用：1時間前を待たずに、今すぐ事前マッチを試す（同じアラーム時刻の相手と）。
+  const testPrematch = async () => {
+    if (!user) return;
+    // 実際の条件と合わせて、アラームがオンのときだけマッチできるようにする。
+    if (!alarmEnabled) {
+      Alert.alert('アラームがオフです', 'マッチングするにはアラームをオンにしてください。');
+      return;
+    }
+    const timeStr = formatTime(alarmTime);
+    try {
+      await joinMatchingPool(user.uid, timeStr);
+      await tryMatch(user.uid, timeStr);
+      Alert.alert(
+        'マッチングを試しました',
+        `${timeStr} に設定した相手を探します。相手も同じ時刻で試すとマッチします。`,
+      );
+    } catch (e) {
+      console.warn('テストマッチ失敗', e);
+      Alert.alert('エラー', '通信環境を確認してください。');
+    }
+  };
+
+  // 時刻を15分ずつ増減する（web でも確実に変更できる。ネイティブのピッカーが使えない場合の代替）。
+  const adjustAlarm = (deltaMinutes: number) => {
+    const d = new Date(alarmTime);
+    d.setMinutes(d.getMinutes() + deltaMinutes);
+    const rounded = roundToQuarter(d); // 15分刻みに保つ
+    setAlarmTime(rounded);
+    AsyncStorage.setItem(STORAGE_KEY_TIME, `${rounded.getHours()}:${rounded.getMinutes()}`);
+    applyAlarmSchedule(alarmEnabled, rounded); // 予約通知も入れ直す
   };
 
   // テスト用：5秒後に本物の通知を出す（通知が実際に届くか確認するため）。
@@ -239,29 +334,7 @@ export default function HomeScreen() {
     );
   };
 
-  // ===== マッチング待機画面（下半分の中央にキャンセルボタン） =====
-  if (status === 'matching') {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.matchingContainer}>
-          {/* 上半分：くるくる＋案内（中央寄せ） */}
-          <View style={styles.matchingTop}>
-            <ActivityIndicator size="large" color="#1D3D47" />
-            <Text style={styles.waitingText}>マッチング待機中...</Text>
-            <Text style={styles.waitingSub}>同じ時間に起きた人を探しています</Text>
-          </View>
-          {/* 下半分：中央にキャンセルボタン */}
-          <View style={styles.matchingBottom}>
-            <TouchableOpacity style={styles.cancelButton} onPress={cancelMatching}>
-              <Text style={styles.cancelButtonText}>キャンセル</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  // ===== 通常画面（idle / ringing） =====
+  // ===== ホーム画面 =====
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.inner}>
@@ -280,9 +353,20 @@ export default function HomeScreen() {
             {formatTime(alarmTime)}
           </Text>
 
-          <TouchableOpacity style={styles.changeButton} onPress={openPicker}>
-            <Text style={styles.changeButtonText}>時刻を変更（15分刻み）</Text>
-          </TouchableOpacity>
+          {/* 時刻の変更：−15分／＋15分（どの端末でも動く）。ネイティブはピッカーも使える。 */}
+          <View style={styles.timeControls}>
+            <TouchableOpacity style={styles.adjustButton} onPress={() => adjustAlarm(-15)}>
+              <Text style={styles.adjustButtonText}>−15分</Text>
+            </TouchableOpacity>
+            {Platform.OS !== 'web' && (
+              <TouchableOpacity style={styles.changeButton} onPress={openPicker}>
+                <Text style={styles.changeButtonText}>時刻を選ぶ</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={styles.adjustButton} onPress={() => adjustAlarm(15)}>
+              <Text style={styles.adjustButtonText}>＋15分</Text>
+            </TouchableOpacity>
+          </View>
 
           {/* iOS 用のインラインピッカー＋「完了」ボタン */}
           {showPicker && Platform.OS === 'ios' && (
@@ -306,25 +390,53 @@ export default function HomeScreen() {
           )}
         </View>
 
-        {/* 下部：鳴動中は「アラームを止める」、それ以外は案内文を表示 */}
+        {/* 下部：鳴動中／マッチ済み／通常 で表示を切り替える */}
         <View style={styles.bottomSection}>
-          {status === 'ringing' ? (
+          {ringing ? (
+            // アラーム鳴動中
             <View style={styles.ringingBox}>
               <Text style={styles.ringingTitle}>⏰ 起きる時間です！</Text>
-              <TouchableOpacity style={styles.stopButton} onPress={stopAlarmAndMatch}>
+              <Text style={styles.hint}>
+                {matchRoomId
+                  ? 'アラームを止めると、トーク相手を待つ画面に進みます。'
+                  : '今回はトーク相手がいません。'}
+              </Text>
+              <TouchableOpacity style={styles.stopButton} onPress={handleStopAlarm}>
                 <Text style={styles.stopButtonText}>アラームを止める</Text>
               </TouchableOpacity>
             </View>
+          ) : matchRoomId ? (
+            // 事前マッチ済み（アラームを待つ）
+            <View style={styles.ringingBox}>
+              <Text style={styles.matchedTitle}>🎉 マッチ成立！</Text>
+              <Text style={styles.hint}>
+                {formatTime(alarmTime)} のアラームで起きて、トークしましょう。
+              </Text>
+              {/* テスト用：スマホは本物の通知を送る／web は画面内で鳴らす */}
+              {Platform.OS === 'web' ? (
+                <TouchableOpacity onPress={testRing} style={styles.testLink}>
+                  <Text style={styles.testLinkText}>（テスト）今すぐ鳴らす</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity onPress={handleTestNotification} style={styles.testLink}>
+                  <Text style={styles.testLinkText}>（テスト）通知を送る</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           ) : (
+            // 通常
             <>
               <Text style={styles.hint}>
                 {alarmEnabled
-                  ? 'アラーム時刻になると、ここに「アラームを止める」ボタンが表示されます。'
+                  ? 'アラームの1時間前になると、同じ時刻に起きる相手と自動でマッチします。'
                   : 'アラームはオフになっています。'}
               </Text>
               {/* テスト用リンク（不要なら削除可） */}
+              <TouchableOpacity onPress={testPrematch} style={styles.testLink}>
+                <Text style={styles.testLinkText}>（テスト）今すぐマッチング相手を探す</Text>
+              </TouchableOpacity>
               <TouchableOpacity onPress={testRing} style={styles.testLink}>
-                <Text style={styles.testLinkText}>（テスト）今すぐ鳴らす（画面のみ）</Text>
+                <Text style={styles.testLinkText}>（テスト）今すぐ鳴らす</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={handleTestNotification} style={styles.testLink}>
                 <Text style={styles.testLinkText}>（テスト）5秒後に通知を送る</Text>
@@ -406,12 +518,29 @@ const styles = StyleSheet.create({
   timeDisabled: {
     color: '#bbb',
   },
+  timeControls: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
+  adjustButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    backgroundColor: '#eef2f3',
+  },
+  adjustButtonText: {
+    color: '#1D3D47',
+    fontSize: 15,
+    fontWeight: '700',
+  },
   changeButton: {
     alignSelf: 'center',
     paddingVertical: 8,
     paddingHorizontal: 20,
     borderRadius: 20,
-    backgroundColor: '#eef2f3',
+    backgroundColor: '#dfe7e9',
   },
   changeButtonText: {
     color: '#1D3D47',
@@ -457,6 +586,12 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#1D3D47',
     marginBottom: 24,
+  },
+  matchedTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#1D3D47',
+    marginBottom: 12,
   },
   stopButton: {
     backgroundColor: '#1D3D47',
