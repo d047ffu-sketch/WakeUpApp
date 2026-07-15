@@ -45,6 +45,7 @@ import {
   setupNotifications,
   showWakeNotification,
 } from '../../lib/notifications';
+import { recordNoShow, recordWoke, toMonthKey } from '../../lib/wake-log';
 
 // AsyncStorage に保存するときのキー名。
 const STORAGE_KEY_TIME = '@wakeupapp:alarmTime'; // "7:30" のような "時:分" 文字列
@@ -83,6 +84,11 @@ export default function HomeScreen() {
   // マッチ中の相手。
   const [partnerId, setPartnerId] = useState('');
   const [partnerName, setPartnerName] = useState('');
+  // 相手の「今月のすっぽかし回数」（信頼の可視化）。
+  const [partnerNoShow, setPartnerNoShow] = useState(0);
+
+  // 自動OFFの処理が二重に走らないようにする目印。
+  const autoOffRunningRef = useRef(false);
 
   // 同じ時刻で何度も鳴らさないための「処理済み」記録（例: "Sun Jun 15 2026 7:30"）。
   const handledKeyRef = useRef<string | null>(null);
@@ -138,6 +144,47 @@ export default function HomeScreen() {
     [user],
   );
 
+  // アラーム時刻＋30分になったときの処理。
+  // マッチしていたのに起きていなければ「すっぽかし」として記録してから OFF にする。
+  const handleAutoOff = useCallback(
+    async (roomId: string | null) => {
+      if (autoOffRunningRef.current) return;
+      autoOffRunningRef.current = true;
+      try {
+        if (roomId && user) {
+          // 部屋の最新状態を読み、自分が起きていたかを確かめる
+          // （画面の状態より、サーバーの記録を信じる）。
+          const snap = await getDoc(doc(db, 'rooms', roomId));
+          const data = snap.data();
+          const iWokeUp = data?.awake?.[user.uid] === true;
+          if (!iWokeUp) {
+            const participants: string[] = data?.participants ?? [];
+            const pid = participants.find((id) => id !== user.uid) ?? '';
+            const name = (data?.names ?? {})[pid] ?? '相手';
+            await recordNoShow(user.uid, name, formatTime(alarmTime)).catch(() => {});
+          }
+        }
+      } catch (e) {
+        console.warn('すっぽかし記録に失敗', e);
+      }
+      await turnAlarmOff(roomId);
+      autoOffRunningRef.current = false;
+    },
+    [user, alarmTime, turnAlarmOff],
+  );
+
+  // 相手の「今月のすっぽかし回数」を購読する（マッチ中だけ）。
+  useEffect(() => {
+    if (!partnerId) {
+      setPartnerNoShow(0);
+      return;
+    }
+    const monthKey = toMonthKey(new Date());
+    return onSnapshot(doc(db, 'users', partnerId), (snap) => {
+      setPartnerNoShow(snap.data()?.noShow?.[monthKey] ?? 0);
+    });
+  }, [partnerId]);
+
   // 画面表示時に、ニックネームと保存済みのアラーム設定を読み込む。
   useEffect(() => {
     if (!user) return;
@@ -190,9 +237,9 @@ export default function HomeScreen() {
     const id = setInterval(() => {
       const now = new Date();
 
-      // ① アラーム時刻＋30分を過ぎたら自動でOFF（マッチも解除してリセット）。
+      // ① アラーム時刻＋30分を過ぎたら自動でOFF（起きていなければ すっぽかし を記録）。
       if (alarmEnabled && autoOffAt && now.getTime() >= autoOffAt) {
-        void turnAlarmOff(matchRoomId);
+        void handleAutoOff(matchRoomId);
         return;
       }
       if (!alarmEnabled) return;
@@ -227,7 +274,7 @@ export default function HomeScreen() {
       }
     }, 1000);
     return () => clearInterval(id);
-  }, [alarmEnabled, alarmTime, matchRoomId, user, autoOffAt, turnAlarmOff]);
+  }, [alarmEnabled, alarmTime, matchRoomId, user, autoOffAt, handleAutoOff]);
 
   // 1分ごとにあいさつを今の時間帯に合わせ直す（アプリを開きっぱなしでも切り替わるように）。
   // 値が変わらないときは React が再描画を省くので無駄な処理にはならない。
@@ -350,8 +397,14 @@ export default function HomeScreen() {
   const handleStopAlarm = async () => {
     setRinging(false);
     if (!user) return;
+
+    // アラームを止めた＝起きた、としてカレンダーに記録する（相手が来なくても自分は起きた）。
+    await recordWoke(user.uid, partnerName, formatTime(alarmTime)).catch((e) =>
+      console.warn('起床記録に失敗', e),
+    );
+
     if (!matchRoomId) {
-      // 事前マッチしていない場合はアラームを止めるだけ。
+      // マッチしていない場合はアラームを止めるだけ。
       Alert.alert('おはようございます', '今回はトーク相手が見つかりませんでした。');
       return;
     }
@@ -394,8 +447,13 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.inner}>
-        {/* あいさつ */}
-        <Text style={styles.greeting}>{greeting}、{nickname || 'あなた'} さん</Text>
+        {/* あいさつ ＋ カレンダーへの導線 */}
+        <View style={styles.headerRow}>
+          <Text style={styles.greeting}>{greeting}、{nickname || 'あなた'} さん</Text>
+          <TouchableOpacity style={styles.calendarButton} onPress={() => router.push('/calendar')}>
+            <Text style={styles.calendarButtonText}>カレンダー</Text>
+          </TouchableOpacity>
+        </View>
 
         {/* アラーム設定カード */}
         <View style={styles.card}>
@@ -475,10 +533,19 @@ export default function HomeScreen() {
             <View style={styles.ringingBox}>
               <Text style={styles.matchedTitle}>🎉 マッチ成立！</Text>
               <Text style={styles.partnerName}>{partnerName || '相手'} さん</Text>
-              <View style={styles.meetBadge}>
-                <Text style={styles.meetBadgeText}>
-                  {meetingNumber === 1 ? 'はじめまして' : `${meetingNumber}回目`}
-                </Text>
+              <View style={styles.badgeRow}>
+                <View style={styles.meetBadge}>
+                  <Text style={styles.meetBadgeText}>
+                    {meetingNumber === 1 ? 'はじめまして' : `${meetingNumber}回目`}
+                  </Text>
+                </View>
+                {/* 信頼の可視化：相手の今月のすっぽかし回数 */}
+                <View style={[styles.noShowBadge, partnerNoShow > 0 && styles.noShowBadgeWarn]}>
+                  <Text
+                    style={[styles.noShowText, partnerNoShow > 0 && styles.noShowTextWarn]}>
+                    今月のすっぽかし {partnerNoShow}回
+                  </Text>
+                </View>
               </View>
               <Text style={styles.hint}>
                 {formatTime(alarmTime)} のアラームで起きて、トークしましょう。
@@ -571,7 +638,7 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: 'bold',
     color: '#1D3D47',
-    marginBottom: 24,
+    flexShrink: 1,
   },
   card: {
     backgroundColor: '#fff',
@@ -623,17 +690,58 @@ const styles = StyleSheet.create({
     color: '#1D3D47',
     marginBottom: 8,
   },
+  badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 16,
+  },
   meetBadge: {
     paddingVertical: 6,
     paddingHorizontal: 18,
     borderRadius: 16,
     backgroundColor: '#1D3D47',
-    marginBottom: 16,
   },
   meetBadgeText: {
     color: '#fff',
     fontSize: 15,
     fontWeight: 'bold',
+  },
+  noShowBadge: {
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    backgroundColor: '#e3f5e8',
+  },
+  noShowBadgeWarn: {
+    backgroundColor: '#fdeaea',
+  },
+  noShowText: {
+    color: '#1e7a44',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  noShowTextWarn: {
+    color: '#c23b3b',
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+  },
+  calendarButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    backgroundColor: '#fff',
+  },
+  calendarButtonText: {
+    color: '#1D3D47',
+    fontSize: 13,
+    fontWeight: '700',
   },
   timeControls: {
     flexDirection: 'row',
