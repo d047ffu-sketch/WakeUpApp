@@ -20,10 +20,12 @@ import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  KeyboardAvoidingView,
   Platform,
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -35,6 +37,7 @@ import {
   joinMatchingPool,
   markAwake,
   removeFromPool,
+  sendWakeMessage,
   subscribeWaitingCounts,
   tryMatch,
 } from '../../lib/matching';
@@ -86,6 +89,11 @@ export default function HomeScreen() {
   const [partnerName, setPartnerName] = useState('');
   // 相手の「今月のすっぽかし回数」（信頼の可視化）。
   const [partnerNoShow, setPartnerNoShow] = useState(0);
+  // 起きた合図として相手に送る「朝の一言」。送信＝アラームを止めたことになる。
+  const [wakeMessage, setWakeMessage] = useState('');
+  const [sendingWake, setSendingWake] = useState(false);
+  // 相手から届いている「朝の一言」（相手が先に起きた場合）。
+  const [partnerWakeMessage, setPartnerWakeMessage] = useState('');
 
   // 自動OFFの処理が二重に走らないようにする目印。
   const autoOffRunningRef = useRef(false);
@@ -321,6 +329,9 @@ export default function HomeScreen() {
       setPartnerId(pid);
       setPartnerName((snap.data().names ?? {})[pid] || '相手');
 
+      // 相手が先に起きて送ってきた「朝の一言」。
+      setPartnerWakeMessage((snap.data().wakeMessages ?? {})[pid] ?? '');
+
       const ping = snap.data().wakePing;
       // 自分宛て かつ 新しい合図（2分以内）だけ通知する。
       if (
@@ -394,26 +405,44 @@ export default function HomeScreen() {
 
   // 「アラームを止める」を押したとき。
   // 自分の起床を記録し、トーク待機画面へ移動する（相手も起きたらトークルームへ）。
+  // マッチ相手がいない場合だけ使う「アラームを止める」。
   const handleStopAlarm = async () => {
     setRinging(false);
     if (!user) return;
-
-    // アラームを止めた＝起きた、としてカレンダーに記録する（相手が来なくても自分は起きた）。
-    await recordWoke(user.uid, partnerName, formatTime(alarmTime)).catch((e) =>
+    // アラームを止めた＝起きた、としてカレンダーに記録する。
+    await recordWoke(user.uid, '', formatTime(alarmTime)).catch((e) =>
       console.warn('起床記録に失敗', e),
     );
+    Alert.alert('おはようございます', '今回はトーク相手が見つかりませんでした。');
+  };
 
-    if (!matchRoomId) {
-      // マッチしていない場合はアラームを止めるだけ。
-      Alert.alert('おはようございます', '今回はトーク相手が見つかりませんでした。');
-      return;
-    }
+  // 相手に「朝の一言」を送る＝アラームを止めたことになる。
+  // 文章を打って送る必要があるので、寝ぼけたままでは止められない（起きた証明になる）。
+  // 送信に成功して初めてアラームが止まり、トーク待機画面へ進む。
+  const handleSendWakeMessage = async () => {
+    const text = wakeMessage.trim();
+    if (!text || !user || !matchRoomId || sendingWake) return;
+
+    setSendingWake(true);
     try {
+      // ① 相手に届ける（トークルームの1言目にもなる）
+      await sendWakeMessage(matchRoomId, user.uid, text);
+      // ② カレンダーに「起きた」を記録
+      await recordWoke(user.uid, partnerName, formatTime(alarmTime)).catch((e) =>
+        console.warn('起床記録に失敗', e),
+      );
+      // ③ 起床フラグを立てる（2人揃えばトークルームが始まる）
       await markAwake(user.uid, matchRoomId);
+
+      // ここまで成功して初めてアラームを止める。
+      setRinging(false);
+      setWakeMessage('');
       router.push({ pathname: '/talk-waiting/[roomId]', params: { roomId: matchRoomId } });
     } catch (e) {
-      console.warn('起床の記録に失敗', e);
-      Alert.alert('エラー', '通信環境を確認してください。');
+      console.warn('一言の送信に失敗', e);
+      Alert.alert('送信できませんでした', '通信環境を確認して、もう一度お試しください。');
+    } finally {
+      setSendingWake(false);
     }
   };
 
@@ -446,6 +475,10 @@ export default function HomeScreen() {
   // ===== ホーム画面 =====
   return (
     <SafeAreaView style={styles.container}>
+      {/* 一言を打つときにキーボードで入力欄が隠れないようにする */}
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={styles.inner}>
         {/* あいさつ ＋ カレンダーへの導線 */}
         <View style={styles.headerRow}>
@@ -516,17 +549,55 @@ export default function HomeScreen() {
         {/* 下部：鳴動中／マッチ済み／通常 で表示を切り替える */}
         <View style={styles.bottomSection}>
           {ringing ? (
-            // アラーム鳴動中
+            // アラーム鳴動中：相手がいれば「一言を送る」＝アラームを止める
             <View style={styles.ringingBox}>
               <Text style={styles.ringingTitle}>⏰ 起きる時間です！</Text>
-              <Text style={styles.hint}>
-                {matchRoomId
-                  ? 'アラームを止めると、トーク相手を待つ画面に進みます。'
-                  : '今回はトーク相手がいません。'}
-              </Text>
-              <TouchableOpacity style={styles.stopButton} onPress={handleStopAlarm}>
-                <Text style={styles.stopButtonText}>アラームを止める</Text>
-              </TouchableOpacity>
+
+              {matchRoomId ? (
+                <>
+                  {/* 相手が先に起きて一言を送ってくれていたら見せる（起きる動機になる） */}
+                  {partnerWakeMessage ? (
+                    <View style={styles.partnerMessageBox}>
+                      <Text style={styles.partnerMessageFrom}>
+                        {partnerName || '相手'} さんから
+                      </Text>
+                      <Text style={styles.partnerMessageText}>{partnerWakeMessage}</Text>
+                    </View>
+                  ) : null}
+
+                  <Text style={styles.hint}>
+                    {partnerName || '相手'} さんに一言送ると、アラームが止まります。
+                  </Text>
+
+                  <TextInput
+                    style={styles.wakeInput}
+                    value={wakeMessage}
+                    onChangeText={setWakeMessage}
+                    placeholder="おはよう！今日もがんばろう"
+                    placeholderTextColor="#9aa6ab"
+                    maxLength={100}
+                    multiline
+                  />
+                  <TouchableOpacity
+                    style={[
+                      styles.stopButton,
+                      (!wakeMessage.trim() || sendingWake) && styles.stopButtonDisabled,
+                    ]}
+                    onPress={handleSendWakeMessage}
+                    disabled={!wakeMessage.trim() || sendingWake}>
+                    <Text style={styles.stopButtonText}>
+                      {sendingWake ? '送信中…' : '送信してアラームを止める'}
+                    </Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.hint}>今回はトーク相手がいません。</Text>
+                  <TouchableOpacity style={styles.stopButton} onPress={handleStopAlarm}>
+                    <Text style={styles.stopButtonText}>アラームを止める</Text>
+                  </TouchableOpacity>
+                </>
+              )}
             </View>
           ) : matchRoomId ? (
             // マッチ済み（アラームを待つ）：相手の名前と「◯回目」を見せる
@@ -580,6 +651,7 @@ export default function HomeScreen() {
           )}
         </View>
       </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -625,9 +697,47 @@ function computeAutoOffAt(alarm: Date, fromMs: number): number {
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   container: {
     flex: 1,
     backgroundColor: '#f2f4f5',
+  },
+  wakeInput: {
+    width: '100%',
+    minHeight: 52,
+    maxHeight: 100,
+    borderWidth: 1,
+    borderColor: '#ccd4d7',
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+    marginTop: 12,
+    marginBottom: 12,
+    textAlignVertical: 'top',
+  },
+  stopButtonDisabled: {
+    opacity: 0.4,
+  },
+  partnerMessageBox: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#e0e4e6',
+    maxWidth: 320,
+  },
+  partnerMessageFrom: {
+    fontSize: 12,
+    color: '#888',
+    marginBottom: 6,
+  },
+  partnerMessageText: {
+    fontSize: 16,
+    color: '#1D3D47',
+    lineHeight: 24,
   },
   inner: {
     flex: 1,
