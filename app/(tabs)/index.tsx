@@ -106,6 +106,9 @@ export default function HomeScreen() {
   const lastTryMatchRef = useRef<number>(0);
   // 受け取った最後の「起きて！」の時刻（同じ合図で二重通知しないため）。
   const lastWakePingRef = useRef<number>(0);
+  // 会った回数の最新値。マッチの抽選に渡す（state だと更新のたびに
+  // 1秒ごとの処理が作り直されてしまうので、ref で持つ）。
+  const metCountRef = useRef<Record<string, number>>({});
 
   // 今マッチしている相手とは「何回目」か（＝過去に話せた回数 ＋ 今回）。
   const meetingNumber = (metCount[partnerId] ?? 0) + 1;
@@ -131,7 +134,10 @@ export default function HomeScreen() {
       joinedRef.current = true;
       lastTryMatchRef.current = Date.now();
       await joinMatchingPool(user.uid, timeStr).catch((e) => console.warn('待機登録失敗', e));
-      await tryMatch(user.uid, timeStr).catch((e) => console.warn('マッチ試行失敗', e));
+      // 会ったことがある人ほど当たりやすい抽選で相手を選ぶ。
+      await tryMatch(user.uid, timeStr, metCountRef.current).catch((e) =>
+        console.warn('マッチ試行失敗', e),
+      );
     },
     [user],
   );
@@ -277,7 +283,9 @@ export default function HomeScreen() {
         } else if (Date.now() - lastTryMatchRef.current >= 2500) {
           // 2.5秒ごとに相手を探す。相手が待機列に来ていれば成立する。
           lastTryMatchRef.current = Date.now();
-          void tryMatch(user.uid, timeStr).catch((e) => console.warn('マッチ試行失敗', e));
+          void tryMatch(user.uid, timeStr, metCountRef.current).catch((e) =>
+            console.warn('マッチ試行失敗', e),
+          );
         }
       }
     }, 1000);
@@ -305,7 +313,10 @@ export default function HomeScreen() {
       const data = snap.data();
       const roomId = data?.currentRoomId;
       setMatchRoomId(roomId ? roomId : null);
-      setMetCount(data?.metCount ?? {});
+      const counts = data?.metCount ?? {};
+      setMetCount(counts);
+      metCountRef.current = counts; // 抽選で使う最新値
+
       // マッチが成立した＝待機列からは外れているので、登録済みフラグを下ろす。
       if (roomId) joinedRef.current = false;
     });
