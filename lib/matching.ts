@@ -12,6 +12,8 @@ import {
   deleteDoc,
   doc,
   getDocs,
+  increment,
+  onSnapshot,
   query,
   runTransaction,
   serverTimestamp,
@@ -20,6 +22,27 @@ import {
   where,
 } from 'firebase/firestore';
 import { db } from '../firebase';
+
+// 待機列を監視して「アラーム時刻ごとの待機者数」を返す。
+// 自分自身は数えない（＝マッチできる相手が何人いるか）。
+// 戻り値は購読を止める関数。
+export function subscribeWaitingCounts(
+  selfUid: string,
+  onChange: (counts: Record<string, number>) => void,
+): () => void {
+  return onSnapshot(collection(db, 'matching_pool'), (snap) => {
+    const counts: Record<string, number> = {};
+    snap.docs.forEach((d) => {
+      if (d.id === selfUid) return; // 自分は除く
+      const data = d.data();
+      if (data.enabled !== true) return; // アラームONの人だけ
+      const time = data.alarmTime;
+      if (!time) return;
+      counts[time] = (counts[time] ?? 0) + 1;
+    });
+    onChange(counts);
+  });
+}
 
 // 待機列に参加する。「同じアラーム時刻の人」を探すため alarmTime も保存する。
 // enabled はアラームがオンの人だけをマッチ対象にするための目印（登録時は必ずオン）。
@@ -107,11 +130,13 @@ export async function leaveMatchingPool(uid: string): Promise<void> {
 }
 
 // 自分が「起きた（アラームを止めた）」ことを部屋に記録する。
-// 2人とも起きたら sessionStartedAt をセットする（＝トーク開始・5分計測の基準）。
+// 2人とも起きたら sessionStartedAt をセットし（＝トーク開始・5分計測の基準）、
+// 「実際に話せた回数」を両者に1回ずつ加算する（＝「◯回目です」の元データ）。
 export async function markAwake(uid: string, roomId: string): Promise<void> {
   await runTransaction(db, async (tx) => {
     const roomRef = doc(db, 'rooms', roomId);
-    const room = await tx.get(roomRef);
+    const room = await tx.get(roomRef); // 読み取りは書き込みより先に行う
+
     if (!room.exists()) return;
 
     const awake: Record<string, boolean> = { ...(room.get('awake') ?? {}), [uid]: true };
@@ -122,6 +147,14 @@ export async function markAwake(uid: string, roomId: string): Promise<void> {
     // 2人とも起きた瞬間に、まだ無ければ開始時刻をセットする。
     if (bothAwake && !room.get('sessionStartedAt')) {
       update.sessionStartedAt = serverTimestamp();
+
+      // ここで初めて「実際に話せた」とみなし、お互いの会った回数を +1 する。
+      // （マッチしただけ・すっぽかされた相手は数えない）
+      const partnerId = participants.find((id) => id !== uid);
+      if (partnerId) {
+        tx.update(doc(db, 'users', uid), { [`metCount.${partnerId}`]: increment(1) });
+        tx.update(doc(db, 'users', partnerId), { [`metCount.${uid}`]: increment(1) });
+      }
     }
     tx.update(roomRef, update);
   });
