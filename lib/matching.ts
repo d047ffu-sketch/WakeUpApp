@@ -8,6 +8,7 @@
 //   4. 2人とも起きたら sessionStartedAt がセットされ、トークルーム（5分チャット）へ。
 
 import {
+  addDoc,
   collection,
   deleteDoc,
   doc,
@@ -22,6 +23,26 @@ import {
   where,
 } from 'firebase/firestore';
 import { db } from '../firebase';
+
+// 起きた合図として、相手に「朝の一言」を送る。
+// ・チャットのメッセージとして追加する → トークルームでそのまま会話の1言目になる
+// ・部屋にも控えを置く → 相手はまだ寝ていて鳴動画面にいるので、そこで見せられる
+export async function sendWakeMessage(
+  roomId: string,
+  uid: string,
+  text: string,
+): Promise<void> {
+  await addDoc(collection(db, 'rooms', roomId, 'messages'), {
+    senderId: uid,
+    text,
+    createdAt: serverTimestamp(),
+  });
+  await updateDoc(doc(db, 'rooms', roomId), {
+    [`wakeMessages.${uid}`]: text, // 相手の鳴動画面に出すための控え
+    lastMessage: text,
+    lastActivityAt: serverTimestamp(),
+  });
+}
 
 // 待機列を監視して「アラーム時刻ごとの待機者数」を返す。
 // 自分自身は数えない（＝マッチできる相手が何人いるか）。
@@ -63,21 +84,61 @@ export async function removeFromPool(uid: string): Promise<void> {
   await deleteDoc(doc(db, 'matching_pool', uid)).catch(() => {});
 }
 
+// 相手候補の「当たりやすさ（重み）」を決める。
+// 会ったことがある人ほど重くする＝また会いやすくするが、上限をつけて頭打ちにする。
+//   会った回数 0回（初対面） → 重み 1
+//              1回           → 重み 2
+//              2回           → 重み 3
+//              3回以上       → 重み 4（これ以上は増えない）
+//
+// なぜ上限が要るか：上限が無いと、よく会う人の重みが際限なく大きくなり、
+// 事実上その人で「固定」されてしまう。上限があれば「よく会う人はいるが、
+// 初めての人にもちゃんと出会える」状態が続く。
+function weightFor(metCount: number): number {
+  return 1 + Math.min(metCount, 3);
+}
+
+// 重みに応じた抽選で1人選ぶ（重い人ほど当たりやすいが、確定ではない）。
+function pickWeighted<T>(items: T[], weightOf: (item: T) => number): T {
+  const total = items.reduce((sum, item) => sum + weightOf(item), 0);
+  let r = Math.random() * total;
+  for (const item of items) {
+    r -= weightOf(item);
+    if (r <= 0) return item;
+  }
+  return items[items.length - 1]; // 誤差で選ばれなかった時の保険
+}
+
 // 同じアラーム時刻の相手を探してペアを作る。
 // 成立したら部屋IDを返す。相手がいなければ null（=このまま待機を続ける）。
-export async function tryMatch(uid: string, alarmTime: string): Promise<string | null> {
+//
+// metCount（相手ごとの「実際に話せた回数」）を渡すと、
+// 会ったことがある人ほど当たりやすい重み付き抽選で相手を選ぶ。
+// 固定ではなく抽選なので、初めての人にも出会える。
+export async function tryMatch(
+  uid: string,
+  alarmTime: string,
+  metCount: Record<string, number> = {},
+): Promise<string | null> {
+  // このループ内で失敗した相手は、次の挑戦では除く（同じ相手を選び直さない）。
+  const tried = new Set<string>();
+
   for (let attempt = 0; attempt < 5; attempt++) {
     // 同じ alarmTime の待機者を取得（equality だけなので複合索引は不要）。
-    // その中から「自分以外」かつ「アラームがオン(enabled)」の人だけを相手候補にし、
-    // 待機開始が一番早い人を選ぶ。← マッチ条件は「オン かつ 同じ時刻」。
+    // その中から「自分以外」かつ「アラームがオン(enabled)」の人だけを相手候補にする。
+    // ← マッチ条件は「オン かつ 同じ時刻」。
     const poolSnap = await getDocs(
       query(collection(db, 'matching_pool'), where('alarmTime', '==', alarmTime)),
     );
-    const candidates = poolSnap.docs
-      .filter((d) => d.id !== uid && d.data().enabled === true)
-      .sort((a, b) => (a.data().joinedAt ?? 0) - (b.data().joinedAt ?? 0));
+    const candidates = poolSnap.docs.filter(
+      (d) => d.id !== uid && d.data().enabled === true && !tried.has(d.id),
+    );
     if (candidates.length === 0) return null; // 同時刻でオンの相手がいない → 待機継続
-    const partnerId = candidates[0].id;
+
+    // 会った回数に応じた重み付き抽選で相手を決める。
+    const partnerDoc = pickWeighted(candidates, (d) => weightFor(metCount[d.id] ?? 0));
+    const partnerId = partnerDoc.id;
+    tried.add(partnerId);
 
     // 同じ2人なら必ず同じ部屋IDになるよう、UIDを並べ替えて連結する（履歴が残る）。
     const roomId = [uid, partnerId].sort().join('_');
@@ -105,6 +166,7 @@ export async function tryMatch(uid: string, alarmTime: string): Promise<string |
           awake: { [uid]: false, [partnerId]: false },
           sessionStartedAt: null, // 2人とも起きたらセットされる（5分タイマー開始）
           wakePing: null,
+          wakeMessages: null, // 今回の「朝の一言」は空から始める
           matchedAt: serverTimestamp(),
           lastActivityAt: serverTimestamp(),
         },
