@@ -8,6 +8,7 @@
 //   4. 2人とも起きたら sessionStartedAt がセットされ、トークルーム（5分チャット）へ。
 
 import {
+  addDoc,
   collection,
   deleteDoc,
   doc,
@@ -22,6 +23,26 @@ import {
   where,
 } from 'firebase/firestore';
 import { db } from '../firebase';
+
+// 起きた合図として、相手に「朝の一言」を送る。
+// ・チャットのメッセージとして追加する → トークルームでそのまま会話の1言目になる
+// ・部屋にも控えを置く → 相手はまだ寝ていて鳴動画面にいるので、そこで見せられる
+export async function sendWakeMessage(
+  roomId: string,
+  uid: string,
+  text: string,
+): Promise<void> {
+  await addDoc(collection(db, 'rooms', roomId, 'messages'), {
+    senderId: uid,
+    text,
+    createdAt: serverTimestamp(),
+  });
+  await updateDoc(doc(db, 'rooms', roomId), {
+    [`wakeMessages.${uid}`]: text, // 相手の鳴動画面に出すための控え
+    lastMessage: text,
+    lastActivityAt: serverTimestamp(),
+  });
+}
 
 // 待機列を監視して「アラーム時刻ごとの待機者数」を返す。
 // 自分自身は数えない（＝マッチできる相手が何人いるか）。
@@ -105,6 +126,7 @@ export async function tryMatch(uid: string, alarmTime: string): Promise<string |
           awake: { [uid]: false, [partnerId]: false },
           sessionStartedAt: null, // 2人とも起きたらセットされる（5分タイマー開始）
           wakePing: null,
+          wakeMessages: null, // 今回の「朝の一言」は空から始める
           matchedAt: serverTimestamp(),
           lastActivityAt: serverTimestamp(),
         },
