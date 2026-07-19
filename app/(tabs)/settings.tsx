@@ -2,19 +2,17 @@
 // 今はログイン中ユーザーの情報表示とログアウトのみ。
 // 通報・ブロックなどの安全機能は Phase 6 で追加する。
 
-import AppSafeArea from '@/components/app-safe-area';
 import { signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useBgColor } from '../../lib/bg-color-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth, db } from '../../firebase';
 import { useAuth } from '../../lib/auth-context';
 
 export default function SettingsScreen() {
   const { user } = useAuth();
   const [nickname, setNickname] = useState('');
-  const { bgColor, setBgColor } = useBgColor();
 
   // 自分のニックネームを読み込む。
   useEffect(() => {
@@ -25,7 +23,6 @@ export default function SettingsScreen() {
         setNickname(snap.data().nickname ?? '');
       }
     })();
-    // 背景色は BgColorProvider が読み込むためここでは不要
   }, [user]);
 
   // ログアウト確認 → 実行。成功すると _layout.tsx が自動でログイン画面へ戻す。
@@ -46,17 +43,8 @@ export default function SettingsScreen() {
     ]);
   };
 
-  // 背景色変更処理（グローバルの setter を使う）
-  const changeBgColor = async (color: string) => {
-    try {
-      await setBgColor(color);
-    } catch {
-      Alert.alert('エラー', '背景色の保存に失敗しました。');
-    }
-  };
-
   return (
-    <AppSafeArea style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <View style={styles.inner}>
         <Text style={styles.title}>設定</Text>
 
@@ -69,40 +57,11 @@ export default function SettingsScreen() {
           <Text style={styles.value}>{user?.email}</Text>
         </View>
 
-        {/* 背景色設定 */}
-        <View style={styles.card}>
-          <Text style={styles.label}>背景色</Text>
-          <View style={{ height: 12 }} />
-          <View style={styles.colorRow}>
-            <TouchableOpacity
-              style={[styles.colorSwatch, { backgroundColor: '#f2f4f5' }, bgColor === '#f2f4f5' ? styles.colorSelected : null]}
-              onPress={() => changeBgColor('#f2f4f5')}
-            />
-
-            <TouchableOpacity
-              style={[styles.colorSwatch, { backgroundColor: '#fff8e7' }, bgColor === '#fff8e7' ? styles.colorSelected : null]}
-              onPress={() => changeBgColor('#fff8e7')}
-            />
-            <TouchableOpacity
-              style={[styles.colorSwatch, { backgroundColor: '#e8f7ff' }, bgColor === '#e8f7ff' ? styles.colorSelected : null]}
-              onPress={() => changeBgColor('#e8f7ff')}
-            />
-            <TouchableOpacity
-              style={[styles.colorSwatch, { backgroundColor: '#fdeef8' }, bgColor === '#fdeef8' ? styles.colorSelected : null]}
-              onPress={() => changeBgColor('#fdeef8')}
-            />
-            <TouchableOpacity
-              style={[styles.colorSwatch, { backgroundColor: '#e6fff1' }, bgColor === '#e6fff1' ? styles.colorSelected : null]}
-              onPress={() => changeBgColor('#e6fff1')}
-            />
-          </View>
-        </View>
-
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
           <Text style={styles.logoutText}>ログアウト</Text>
         </TouchableOpacity>
       </View>
-    </AppSafeArea>
+    </SafeAreaView>
   );
 }
 
@@ -153,21 +112,5 @@ const styles = StyleSheet.create({
     color: '#B00020',
     fontSize: 16,
     fontWeight: 'bold',
-  },
-  colorRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  colorSwatch: {
-    width: 44,
-    height: 44,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    marginRight: 12,
-  },
-  colorSelected: {
-    borderColor: '#0a7ea4',
-    borderWidth: 2,
   },
 });

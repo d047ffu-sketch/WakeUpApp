@@ -29,7 +29,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import AppSafeArea from '@/components/app-safe-area';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { db } from '../../firebase';
 import { useAuth } from '../../lib/auth-context';
 import {
@@ -152,8 +152,8 @@ export default function HomeScreen() {
       joinedRef.current = false;
       await cancelAlarm();
       if (!user) return;
-      await removeFromPool(user.uid).catch(() => { });
-      if (roomId) await cancelMatch(user.uid, roomId).catch(() => { });
+      await removeFromPool(user.uid).catch(() => {});
+      if (roomId) await cancelMatch(user.uid, roomId).catch(() => {});
     },
     [user],
   );
@@ -175,7 +175,7 @@ export default function HomeScreen() {
             const participants: string[] = data?.participants ?? [];
             const pid = participants.find((id) => id !== user.uid) ?? '';
             const name = (data?.names ?? {})[pid] ?? '相手';
-            await recordNoShow(user.uid, name, formatTime(alarmTime)).catch(() => { });
+            await recordNoShow(user.uid, name, formatTime(alarmTime)).catch(() => {});
           }
         }
       } catch (e) {
@@ -376,7 +376,7 @@ export default function HomeScreen() {
 
     if (!user) return;
     // 時刻が変わると相手の条件も変わるので、マッチ済みなら解除して新しい時刻で入り直す。
-    if (matchRoomId) await cancelMatch(user.uid, matchRoomId).catch(() => { });
+    if (matchRoomId) await cancelMatch(user.uid, matchRoomId).catch(() => {});
     joinedRef.current = false; // 新しい時刻で待機列に入り直す（1秒ごとの処理が拾う）
   };
 
@@ -485,185 +485,185 @@ export default function HomeScreen() {
 
   // ===== ホーム画面 =====
   return (
-    <AppSafeArea style={styles.container}>
+    <SafeAreaView style={styles.container}>
       {/* 一言を打つときにキーボードで入力欄が隠れないようにする */}
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.inner}>
-          {/* あいさつ ＋ カレンダーへの導線 */}
-          <View style={styles.headerRow}>
-            <Text style={styles.greeting}>{greeting}、{nickname || 'あなた'} さん</Text>
-            <TouchableOpacity style={styles.calendarButton} onPress={() => router.push('/calendar')}>
-              <Text style={styles.calendarButtonText}>カレンダー</Text>
+      <View style={styles.inner}>
+        {/* あいさつ ＋ カレンダーへの導線 */}
+        <View style={styles.headerRow}>
+          <Text style={styles.greeting}>{greeting}、{nickname || 'あなた'} さん</Text>
+          <TouchableOpacity style={styles.calendarButton} onPress={() => router.push('/calendar')}>
+            <Text style={styles.calendarButtonText}>カレンダー</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* アラーム設定カード */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.cardTitle}>アラーム</Text>
+            <Switch value={alarmEnabled} onValueChange={toggleEnabled} />
+          </View>
+
+          {/* 大きく時刻を表示 */}
+          <Text style={[styles.time, !alarmEnabled && styles.timeDisabled]}>
+            {formatTime(alarmTime)}
+          </Text>
+
+          {/* この時刻に何人待っているか（人がいる時刻を探せるように） */}
+          <View style={[styles.waitingBadge, waitingHere > 0 && styles.waitingBadgeActive]}>
+            <Text style={[styles.waitingText, waitingHere > 0 && styles.waitingTextActive]}>
+              {waitingHere > 0
+                ? `この時刻に ${waitingHere}人 が待っています`
+                : 'この時刻に待っている人はいません'}
+            </Text>
+          </View>
+
+          {/* 時刻の変更：−30分／＋30分（どの端末でも動く）。ネイティブはピッカーも使える。 */}
+          <View style={styles.timeControls}>
+            <TouchableOpacity style={styles.adjustButton} onPress={() => adjustAlarm(-30)}>
+              <Text style={styles.adjustButtonText}>−30分</Text>
+            </TouchableOpacity>
+            {Platform.OS !== 'web' && (
+              <TouchableOpacity style={styles.changeButton} onPress={openPicker}>
+                <Text style={styles.changeButtonText}>時刻を選ぶ</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={styles.adjustButton} onPress={() => adjustAlarm(30)}>
+              <Text style={styles.adjustButtonText}>＋30分</Text>
             </TouchableOpacity>
           </View>
 
-          {/* アラーム設定カード */}
-          <View style={styles.card}>
-            <View style={styles.cardHeader}>
-              <Text style={styles.cardTitle}>アラーム</Text>
-              <Switch value={alarmEnabled} onValueChange={toggleEnabled} />
-            </View>
-
-            {/* 大きく時刻を表示 */}
-            <Text style={[styles.time, !alarmEnabled && styles.timeDisabled]}>
-              {formatTime(alarmTime)}
-            </Text>
-
-            {/* この時刻に何人待っているか（人がいる時刻を探せるように） */}
-            <View style={[styles.waitingBadge, waitingHere > 0 && styles.waitingBadgeActive]}>
-              <Text style={[styles.waitingText, waitingHere > 0 && styles.waitingTextActive]}>
-                {waitingHere > 0
-                  ? `この時刻に ${waitingHere}人 が待っています`
-                  : 'この時刻に待っている人はいません'}
-              </Text>
-            </View>
-
-            {/* 時刻の変更：−30分／＋30分（どの端末でも動く）。ネイティブはピッカーも使える。 */}
-            <View style={styles.timeControls}>
-              <TouchableOpacity style={styles.adjustButton} onPress={() => adjustAlarm(-30)}>
-                <Text style={styles.adjustButtonText}>−30分</Text>
-              </TouchableOpacity>
-              {Platform.OS !== 'web' && (
-                <TouchableOpacity style={styles.changeButton} onPress={openPicker}>
-                  <Text style={styles.changeButtonText}>時刻を選ぶ</Text>
-                </TouchableOpacity>
-              )}
-              <TouchableOpacity style={styles.adjustButton} onPress={() => adjustAlarm(30)}>
-                <Text style={styles.adjustButtonText}>＋30分</Text>
+          {/* iOS 用のインラインピッカー＋「完了」ボタン */}
+          {showPicker && Platform.OS === 'ios' && (
+            <View>
+              <DateTimePicker
+                value={alarmTime}
+                mode="time"
+                is24Hour
+                display="spinner"
+                minuteInterval={30}
+                // 端末がダークモードでも、白いカード上で数字がちゃんと見えるように
+                // テーマと文字色を明示的に指定する（iOS 用の設定）。
+                themeVariant="light"
+                textColor="#1D3D47"
+                onChange={onChangeTime}
+              />
+              <TouchableOpacity style={styles.doneButton} onPress={() => setShowPicker(false)}>
+                <Text style={styles.doneButtonText}>完了</Text>
               </TouchableOpacity>
             </View>
+          )}
+        </View>
 
-            {/* iOS 用のインラインピッカー＋「完了」ボタン */}
-            {showPicker && Platform.OS === 'ios' && (
-              <View>
-                <DateTimePicker
-                  value={alarmTime}
-                  mode="time"
-                  is24Hour
-                  display="spinner"
-                  minuteInterval={30}
-                  // 端末がダークモードでも、白いカード上で数字がちゃんと見えるように
-                  // テーマと文字色を明示的に指定する（iOS 用の設定）。
-                  themeVariant="light"
-                  textColor="#1D3D47"
-                  onChange={onChangeTime}
-                />
-                <TouchableOpacity style={styles.doneButton} onPress={() => setShowPicker(false)}>
-                  <Text style={styles.doneButtonText}>完了</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
+        {/* 下部：鳴動中／マッチ済み／通常 で表示を切り替える */}
+        <View style={styles.bottomSection}>
+          {ringing ? (
+            // アラーム鳴動中：相手がいれば「一言を送る」＝アラームを止める
+            <View style={styles.ringingBox}>
+              <Text style={styles.ringingTitle}>⏰ 起きる時間です！</Text>
 
-          {/* 下部：鳴動中／マッチ済み／通常 で表示を切り替える */}
-          <View style={styles.bottomSection}>
-            {ringing ? (
-              // アラーム鳴動中：相手がいれば「一言を送る」＝アラームを止める
-              <View style={styles.ringingBox}>
-                <Text style={styles.ringingTitle}>⏰ 起きる時間です！</Text>
-
-                {matchRoomId ? (
-                  <>
-                    {/* 相手が先に起きて一言を送ってくれていたら見せる（起きる動機になる） */}
-                    {partnerWakeMessage ? (
-                      <View style={styles.partnerMessageBox}>
-                        <Text style={styles.partnerMessageFrom}>
-                          {partnerName || '相手'} さんから
-                        </Text>
-                        <Text style={styles.partnerMessageText}>{partnerWakeMessage}</Text>
-                      </View>
-                    ) : null}
-
-                    <Text style={styles.hint}>
-                      {partnerName || '相手'} さんに一言送ると、アラームが止まります。
-                    </Text>
-
-                    <TextInput
-                      style={styles.wakeInput}
-                      value={wakeMessage}
-                      onChangeText={setWakeMessage}
-                      placeholder="おはよう！今日もがんばろう"
-                      placeholderTextColor="#9aa6ab"
-                      maxLength={100}
-                      multiline
-                    />
-                    <TouchableOpacity
-                      style={[
-                        styles.stopButton,
-                        (!wakeMessage.trim() || sendingWake) && styles.stopButtonDisabled,
-                      ]}
-                      onPress={handleSendWakeMessage}
-                      disabled={!wakeMessage.trim() || sendingWake}>
-                      <Text style={styles.stopButtonText}>
-                        {sendingWake ? '送信中…' : '送信してアラームを止める'}
+              {matchRoomId ? (
+                <>
+                  {/* 相手が先に起きて一言を送ってくれていたら見せる（起きる動機になる） */}
+                  {partnerWakeMessage ? (
+                    <View style={styles.partnerMessageBox}>
+                      <Text style={styles.partnerMessageFrom}>
+                        {partnerName || '相手'} さんから
                       </Text>
-                    </TouchableOpacity>
-                  </>
-                ) : (
-                  <>
-                    <Text style={styles.hint}>今回はトーク相手がいません。</Text>
-                    <TouchableOpacity style={styles.stopButton} onPress={handleStopAlarm}>
-                      <Text style={styles.stopButtonText}>アラームを止める</Text>
-                    </TouchableOpacity>
-                  </>
-                )}
-              </View>
-            ) : matchRoomId ? (
-              // マッチ済み（アラームを待つ）：相手の名前と「◯回目」を見せる
-              <View style={styles.ringingBox}>
-                <Text style={styles.matchedTitle}>🎉 マッチ成立！</Text>
-                <Text style={styles.partnerName}>{partnerName || '相手'} さん</Text>
-                <View style={styles.badgeRow}>
-                  <View style={styles.meetBadge}>
-                    <Text style={styles.meetBadgeText}>
-                      {meetingNumber === 1 ? 'はじめまして' : `${meetingNumber}回目`}
+                      <Text style={styles.partnerMessageText}>{partnerWakeMessage}</Text>
+                    </View>
+                  ) : null}
+
+                  <Text style={styles.hint}>
+                    {partnerName || '相手'} さんに一言送ると、アラームが止まります。
+                  </Text>
+
+                  <TextInput
+                    style={styles.wakeInput}
+                    value={wakeMessage}
+                    onChangeText={setWakeMessage}
+                    placeholder="おはよう！今日もがんばろう"
+                    placeholderTextColor="#9aa6ab"
+                    maxLength={100}
+                    multiline
+                  />
+                  <TouchableOpacity
+                    style={[
+                      styles.stopButton,
+                      (!wakeMessage.trim() || sendingWake) && styles.stopButtonDisabled,
+                    ]}
+                    onPress={handleSendWakeMessage}
+                    disabled={!wakeMessage.trim() || sendingWake}>
+                    <Text style={styles.stopButtonText}>
+                      {sendingWake ? '送信中…' : '送信してアラームを止める'}
                     </Text>
-                  </View>
-                  {/* 信頼の可視化：相手の今月のすっぽかし回数 */}
-                  <View style={[styles.noShowBadge, partnerNoShow > 0 && styles.noShowBadgeWarn]}>
-                    <Text
-                      style={[styles.noShowText, partnerNoShow > 0 && styles.noShowTextWarn]}>
-                      今月のすっぽかし {partnerNoShow}回
-                    </Text>
-                  </View>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.hint}>今回はトーク相手がいません。</Text>
+                  <TouchableOpacity style={styles.stopButton} onPress={handleStopAlarm}>
+                    <Text style={styles.stopButtonText}>アラームを止める</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          ) : matchRoomId ? (
+            // マッチ済み（アラームを待つ）：相手の名前と「◯回目」を見せる
+            <View style={styles.ringingBox}>
+              <Text style={styles.matchedTitle}>🎉 マッチ成立！</Text>
+              <Text style={styles.partnerName}>{partnerName || '相手'} さん</Text>
+              <View style={styles.badgeRow}>
+                <View style={styles.meetBadge}>
+                  <Text style={styles.meetBadgeText}>
+                    {meetingNumber === 1 ? 'はじめまして' : `${meetingNumber}回目`}
+                  </Text>
                 </View>
-                <Text style={styles.hint}>
-                  {formatTime(alarmTime)} のアラームで起きて、トークしましょう。
-                </Text>
-                {/* テスト用：スマホは本物の通知を送る／web は画面内で鳴らす */}
-                {Platform.OS === 'web' ? (
-                  <TouchableOpacity onPress={testRing} style={styles.testLink}>
-                    <Text style={styles.testLinkText}>（テスト）今すぐ鳴らす</Text>
-                  </TouchableOpacity>
-                ) : (
-                  <TouchableOpacity onPress={handleTestNotification} style={styles.testLink}>
-                    <Text style={styles.testLinkText}>（テスト）通知を送る</Text>
-                  </TouchableOpacity>
-                )}
+                {/* 信頼の可視化：相手の今月のすっぽかし回数 */}
+                <View style={[styles.noShowBadge, partnerNoShow > 0 && styles.noShowBadgeWarn]}>
+                  <Text
+                    style={[styles.noShowText, partnerNoShow > 0 && styles.noShowTextWarn]}>
+                    今月のすっぽかし {partnerNoShow}回
+                  </Text>
+                </View>
               </View>
-            ) : (
-              // 通常
-              <>
-                <Text style={styles.hint}>
-                  {alarmEnabled
-                    ? '同じ時刻に起きる相手を探しています…'
-                    : 'アラームをオンにすると、同じ時刻に起きる相手を探します。'}
-                </Text>
-                {/* テスト用リンク（不要なら削除可） */}
+              <Text style={styles.hint}>
+                {formatTime(alarmTime)} のアラームで起きて、トークしましょう。
+              </Text>
+              {/* テスト用：スマホは本物の通知を送る／web は画面内で鳴らす */}
+              {Platform.OS === 'web' ? (
                 <TouchableOpacity onPress={testRing} style={styles.testLink}>
                   <Text style={styles.testLinkText}>（テスト）今すぐ鳴らす</Text>
                 </TouchableOpacity>
+              ) : (
                 <TouchableOpacity onPress={handleTestNotification} style={styles.testLink}>
-                  <Text style={styles.testLinkText}>（テスト）5秒後に通知を送る</Text>
+                  <Text style={styles.testLinkText}>（テスト）通知を送る</Text>
                 </TouchableOpacity>
-              </>
-            )}
-          </View>
+              )}
+            </View>
+          ) : (
+            // 通常
+            <>
+              <Text style={styles.hint}>
+                {alarmEnabled
+                  ? '同じ時刻に起きる相手を探しています…'
+                  : 'アラームをオンにすると、同じ時刻に起きる相手を探します。'}
+              </Text>
+              {/* テスト用リンク（不要なら削除可） */}
+              <TouchableOpacity onPress={testRing} style={styles.testLink}>
+                <Text style={styles.testLinkText}>（テスト）今すぐ鳴らす</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleTestNotification} style={styles.testLink}>
+                <Text style={styles.testLinkText}>（テスト）5秒後に通知を送る</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
+      </View>
       </KeyboardAvoidingView>
-    </AppSafeArea>
+    </SafeAreaView>
   );
 }
 

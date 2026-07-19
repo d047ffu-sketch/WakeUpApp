@@ -6,7 +6,7 @@ import { useRouter } from 'expo-router';
 import { collection, doc, getDoc, onSnapshot, query, where } from 'firebase/firestore';
 import { useEffect, useRef, useState } from 'react';
 import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import AppSafeArea from '@/components/app-safe-area';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { db } from '../../firebase';
 import { useAuth } from '../../lib/auth-context';
 
@@ -91,7 +91,7 @@ export default function HistoryScreen() {
   }, [user]);
 
   return (
-    <AppSafeArea style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>トーク履歴</Text>
       </View>
@@ -122,7 +122,7 @@ export default function HistoryScreen() {
           </TouchableOpacity>
         )}
       />
-    </AppSafeArea>
+    </SafeAreaView>
   );
 }
 
@@ -135,7 +135,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 16,
     paddingBottom: 8,
-    //backgroundColor: '#f2f4f5',
   },
   title: {
     fontSize: 28,

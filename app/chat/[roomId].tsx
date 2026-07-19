@@ -29,7 +29,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import AppSafeArea from '@/components/app-safe-area';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { db } from '../../firebase';
 import { useAuth } from '../../lib/auth-context';
 
@@ -75,7 +75,7 @@ export default function ChatRoomScreen() {
     await updateDoc(doc(db, 'users', user.uid), {
       status: 'online',
       currentRoomId: '',
-    }).catch(() => { });
+    }).catch(() => {});
   }, [user]);
 
   // 部屋情報の読み込み＋メッセージのリアルタイム購読。
@@ -181,7 +181,7 @@ export default function ChatRoomScreen() {
       await updateDoc(doc(db, 'rooms', roomId), {
         lastMessage: text,
         lastActivityAt: serverTimestamp(),
-      }).catch(() => { });
+      }).catch(() => {});
     } catch {
       // 送信失敗時は入力を戻す。
       setInput(text);
@@ -196,15 +196,15 @@ export default function ChatRoomScreen() {
 
   if (loading) {
     return (
-      <AppSafeArea style={styles.center}>
+      <SafeAreaView style={styles.center}>
         <Stack.Screen options={{ title: 'チャット' }} />
         <ActivityIndicator size="large" color="#1D3D47" />
-      </AppSafeArea>
+      </SafeAreaView>
     );
   }
 
   return (
-    <AppSafeArea style={styles.container} edges={['bottom']}>
+    <SafeAreaView style={styles.container} edges={['bottom']}>
       {/* ヘッダーのタイトルを相手の名前にする */}
       <Stack.Screen options={{ title: partnerName || 'チャット' }} />
 
@@ -269,7 +269,7 @@ export default function ChatRoomScreen() {
           </View>
         )}
       </KeyboardAvoidingView>
-    </AppSafeArea>
+    </SafeAreaView>
   );
 }
 

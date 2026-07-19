@@ -5,7 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
 import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import AppSafeArea from '@/components/app-safe-area';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { db } from '../../firebase';
 import { useAuth } from '../../lib/auth-context';
 
@@ -60,7 +60,7 @@ export default function MatchSuccessScreen() {
   }, [count, roomId, router]);
 
   return (
-    <AppSafeArea style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <View style={styles.inner}>
         <Text style={styles.emoji}>🎉</Text>
         <Text style={styles.title}>マッチング成功！</Text>
@@ -70,7 +70,7 @@ export default function MatchSuccessScreen() {
 
         <Text style={styles.countdown}>あと {count} 秒でトーク画面に移動します</Text>
       </View>
-    </AppSafeArea>
+    </SafeAreaView>
   );
 }
 

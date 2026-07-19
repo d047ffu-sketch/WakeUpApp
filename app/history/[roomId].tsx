@@ -6,7 +6,7 @@ import { Stack, useLocalSearchParams } from 'expo-router';
 import { collection, doc, getDoc, onSnapshot, orderBy, query } from 'firebase/firestore';
 import { useEffect, useRef, useState } from 'react';
 import { FlatList, StyleSheet, Text, View } from 'react-native';
-import AppSafeArea from '@/components/app-safe-area';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { db } from '../../firebase';
 import { useAuth } from '../../lib/auth-context';
 
@@ -57,13 +57,9 @@ export default function HistoryDetailScreen() {
   }, [roomId]);
 
   return (
-    <AppSafeArea style={styles.container} edges={['bottom']}>
+    <SafeAreaView style={styles.container} edges={['bottom']}>
       {/* ヘッダーのタイトルを相手の名前にする */}
-      <Stack.Screen options={{
-        title: partnerName || 'トーク履歴',
-        // iOS の戻るボタンのタイトルを「戻る」に修正した
-        headerBackTitle: '戻る',
-      }} />
+      <Stack.Screen options={{ title: partnerName || 'トーク履歴' }} />
 
       <FlatList
         ref={listRef}
@@ -85,7 +81,7 @@ export default function HistoryDetailScreen() {
           );
         }}
       />
-    </AppSafeArea>
+    </SafeAreaView>
   );
 }
 

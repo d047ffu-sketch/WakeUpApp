@@ -6,7 +6,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import AppSafeArea from '@/components/app-safe-area';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { db } from '../../firebase';
 import { useAuth } from '../../lib/auth-context';
 import { cancelMatch, sendWakePing } from '../../lib/matching';
@@ -67,7 +67,7 @@ export default function TalkWaitingScreen() {
   };
 
   return (
-    <AppSafeArea style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <View style={styles.inner}>
         <ActivityIndicator size="large" color="#fff" />
         <Text style={styles.title}>相手を待っています…</Text>
@@ -89,7 +89,7 @@ export default function TalkWaitingScreen() {
           <Text style={styles.cancelButtonText}>キャンセル</Text>
         </TouchableOpacity>
       </View>
-    </AppSafeArea>
+    </SafeAreaView>
   );
 }
 

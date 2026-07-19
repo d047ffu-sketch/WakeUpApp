@@ -7,7 +7,6 @@ import 'react-native-reanimated';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
-import { BgColorProvider } from '@/lib/bg-color-context';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -61,14 +60,12 @@ export default function RootLayout() {
   const colorScheme = useColorScheme();
 
   return (
-    // AuthProvider と BgColorProvider で全体を包む
+    // AuthProvider で全体を包み、どの画面からでもログイン状態を参照できるようにする。
     <AuthProvider>
-      <BgColorProvider>
-        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-          <RootLayoutNav />
-          <StatusBar style="auto" />
-        </ThemeProvider>
-      </BgColorProvider>
+      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+        <RootLayoutNav />
+        <StatusBar style="auto" />
+      </ThemeProvider>
     </AuthProvider>
   );
 }
