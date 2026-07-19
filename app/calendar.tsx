@@ -10,7 +10,7 @@ import { Stack, useRouter } from 'expo-router';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import AppSafeArea from '@/components/app-safe-area';
 import { db } from '../firebase';
 import { useAuth } from '../lib/auth-context';
 import { subscribeWakeLogs, toDateKey, type WakeLog } from '../lib/wake-log';
@@ -85,7 +85,7 @@ export default function CalendarScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <AppSafeArea style={styles.container}>
       {/* 画面が独自のヘッダーを出すので、ルート側のヘッダーは消す（二重表示を防ぐ） */}
       <Stack.Screen options={{ headerShown: false }} />
 
@@ -212,7 +212,7 @@ export default function CalendarScreen() {
           )}
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </AppSafeArea>
   );
 }
 
