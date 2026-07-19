@@ -61,7 +61,11 @@ export default function HistoryDetailScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor }]} edges={['bottom']}>
       {/* ヘッダーのタイトルを相手の名前にする */}
-      <Stack.Screen options={{ title: partnerName || 'トーク履歴' }} />
+      <Stack.Screen options={{
+        title: partnerName || 'トーク履歴',
+        // iOS の戻るボタンのタイトルを「戻る」に修正した
+        headerBackTitle: '戻る',
+      }} />
 
       <FlatList
         ref={listRef}
