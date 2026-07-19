@@ -49,6 +49,7 @@ function RootLayoutNav() {
       <Stack.Screen name="(auth)" options={{ headerShown: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="match/[roomId]" options={{ headerShown: false }} />
+      <Stack.Screen name="talk-waiting/[roomId]" options={{ headerShown: false }} />
       <Stack.Screen name="chat/[roomId]" options={{ title: 'チャット' }} />
       <Stack.Screen name="history/[roomId]" options={{ title: 'トーク履歴' }} />
       <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
