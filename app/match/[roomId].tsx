@@ -68,7 +68,7 @@ export default function MatchSuccessScreen() {
         <Text style={styles.title}>マッチング成功！</Text>
 
         <Text style={styles.partnerLabel}>お相手</Text>
-        <Text style={styles.partnerName}>{partnerName || '...'} さん</Text>
+        <Text style={styles.partnerName}>{partnerName || '...' } さん</Text>
 
         <Text style={styles.countdown}>あと {count} 秒でトーク画面に移動します</Text>
       </View>

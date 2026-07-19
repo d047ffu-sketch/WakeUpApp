@@ -208,7 +208,10 @@ export default function ChatRoomScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor }]} edges={['bottom']}>
       {/* ヘッダーのタイトルを相手の名前にする */}
-      <Stack.Screen options={{ title: partnerName || 'チャット' }} />
+      <Stack.Screen options={{ title: partnerName || 'チャット',
+      // iOS の戻るボタンのタイトルを「戻る」に修正した
+      headerBackTitle: '戻る',
+      }} />
 
       {/* 残り時間バー（1分を切ったら赤色） */}
       <View style={styles.timerBar}>

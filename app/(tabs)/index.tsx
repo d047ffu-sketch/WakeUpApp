@@ -23,6 +23,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
   StyleSheet,
   Switch,
   Text,
@@ -576,8 +577,6 @@ export default function HomeScreen() {
                   is24Hour
                   display="spinner"
                   minuteInterval={30}
-                  // 端末がダークモードでも、白いカード上で数字がちゃんと見えるように
-                  // テーマと文字色を明示的に指定する（iOS 用の設定）。
                   themeVariant="light"
                   textColor="#1D3D47"
                   onChange={onChangeTime}
@@ -590,62 +589,71 @@ export default function HomeScreen() {
           </View>
 
           {/* 下部：鳴動中／マッチ済み／通常 で表示を切り替える */}
-          <View style={styles.bottomSection}>
-            {ringing ? (
-              // アラーム鳴動中：相手がいれば「一言を送る」＝アラームを止める
-              <View style={styles.ringingBox}>
-                <Text style={styles.ringingTitle}>⏰ 起きる時間です！</Text>
+          {ringing ? (
+            // アラーム鳴動中：相手がいれば「一言を送る」＝アラームを止める
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              keyboardVerticalOffset={50}
+              style={styles.keyboardView}>
+              <ScrollView
+                contentContainerStyle={styles.scrollContent}
+                showsVerticalScrollIndicator={false}>
+                <View style={styles.ringingBox}>
+                  <Text style={styles.ringingTitle}>⏰ 起きる時間です！</Text>
 
-                {matchRoomId ? (
-                  <>
-                    {/* 相手が先に起きて一言を送ってくれていたら見せる（起きる動機になる） */}
-                    {partnerWakeMessage ? (
-                      <View style={styles.partnerMessageBox}>
-                        <Text style={styles.partnerMessageFrom}>
-                          {partnerName || '相手'} さんから
-                        </Text>
-                        <Text style={styles.partnerMessageText}>{partnerWakeMessage}</Text>
-                      </View>
-                    ) : null}
+                  {matchRoomId ? (
+                    <>
+                      {/* 相手が先に起きて一言を送ってくれていたら見せる（起きる動機になる） */}
+                      {partnerWakeMessage ? (
+                        <View style={styles.partnerMessageBox}>
+                          <Text style={styles.partnerMessageFrom}>
+                            {partnerName || '相手'} さんから
+                          </Text>
+                          <Text style={styles.partnerMessageText}>{partnerWakeMessage}</Text>
+                        </View>
+                      ) : null}
 
-                    <Text style={styles.hint}>
-                      {partnerName || '相手'} さんに一言送ると、アラームが止まります。
-                    </Text>
-
-                    <TextInput
-                      style={styles.wakeInput}
-                      value={wakeMessage}
-                      onChangeText={setWakeMessage}
-                      placeholder="おはよう！今日もがんばろう"
-                      placeholderTextColor="#9aa6ab"
-                      maxLength={100}
-                      multiline
-                    />
-                    <TouchableOpacity
-                      style={[
-                        styles.stopButton,
-                        (!wakeMessage.trim() || sendingWake) && styles.stopButtonDisabled,
-                      ]}
-                      onPress={handleSendWakeMessage}
-                      disabled={!wakeMessage.trim() || sendingWake}>
-                      <Text style={styles.stopButtonText}>
-                        {sendingWake ? '送信中…' : '送信してアラームを止める'}
+                      <Text style={styles.hint}>
+                        {partnerName || '相手'} さんに一言送ると、アラームが止まります。
                       </Text>
-                    </TouchableOpacity>
-                  </>
-                ) : (
-                  <>
-                    <Text style={styles.hint}>今回はトーク相手がいません。</Text>
-                    <TouchableOpacity style={styles.stopButton} onPress={handleStopAlarm}>
-                      <Text style={styles.stopButtonText}>アラームを止める</Text>
-                    </TouchableOpacity>
-                  </>
-                )}
-              </View>
-            ) : matchRoomId ? (
-              // マッチ済み（アラームを待つ）：相手の名前と「◯回目」を見せる
+
+                      <TextInput
+                        style={styles.wakeInput}
+                        value={wakeMessage}
+                        onChangeText={setWakeMessage}
+                        placeholder="おはよう！今日もがんばろう"
+                        placeholderTextColor="#9aa6ab"
+                        maxLength={100}
+                        multiline
+                      />
+                      <TouchableOpacity
+                        style={[
+                          styles.stopButton,
+                          (!wakeMessage.trim() || sendingWake) && styles.stopButtonDisabled,
+                        ]}
+                        onPress={handleSendWakeMessage}
+                        disabled={!wakeMessage.trim() || sendingWake}>
+                        <Text style={styles.stopButtonText}>
+                          {sendingWake ? '送信中…' : '送信してアラームを止める'}
+                        </Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.hint}>今回はトーク相手がいません。</Text>
+                      <TouchableOpacity style={styles.stopButton} onPress={handleStopAlarm}>
+                        <Text style={styles.stopButtonText}>アラームを止める</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+                </View>
+              </ScrollView>
+            </KeyboardAvoidingView>
+          ) : matchRoomId ? (
+            // マッチ済み（アラームを待つ）：相手の名前と「◯回目」を見せる
+            <View style={styles.bottomSection}>
               <View style={styles.ringingBox}>
-                <Text style={styles.matchedTitle}>🎉 マッチ成立！</Text>
+                <Text style={styles.matchedTitle}>🎉 マッチングしました！</Text>
                 <Text style={styles.partnerName}>{partnerName || '相手'} さん</Text>
                 <View style={styles.badgeRow}>
                   <View style={styles.meetBadge}>
@@ -675,27 +683,27 @@ export default function HomeScreen() {
                   </TouchableOpacity>
                 )}
               </View>
-            ) : (
-              // 通常
-              <>
-                <Text style={styles.hint}>
-                  {alarmEnabled
-                    ? '同じ時刻に起きる相手を探しています…'
-                    : 'アラームをオンにすると、同じ時刻に起きる相手を探します。'}
-                </Text>
-                {/* テスト用リンク（不要なら削除可） */}
-                <TouchableOpacity onPress={testRing} style={styles.testLink}>
-                  <Text style={styles.testLinkText}>（テスト）今すぐ鳴らす</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={handleTestNotification} style={styles.testLink}>
-                  <Text style={styles.testLinkText}>（テスト）5秒後に通知を送る</Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
+            </View>
+          ) : (
+            // 通常
+            <View style={styles.bottomSection}>
+              <Text style={styles.hint}>
+                {alarmEnabled
+                  ? '同じ時刻に起きる相手を探しています…'
+                  : 'アラームをオンにすると、同じ時刻に起きる相手を探します。'}
+              </Text>
+              {/* テスト用リンク（不要なら削除可） */}
+              <TouchableOpacity onPress={testRing} style={styles.testLink}>
+                <Text style={styles.testLinkText}>（テスト）今すぐ鳴らす</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleTestNotification} style={styles.testLink}>
+                <Text style={styles.testLinkText}>（テスト）5秒後に通知を送る</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </SafeAreaView >
   );
 }
 
@@ -956,8 +964,25 @@ const styles = StyleSheet.create({
     color: '#9aa6ab',
     textDecorationLine: 'underline',
   },
+  keyboardView: {
+    flex: 1,
+    width: '100%',
+  },
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingBottom: 20,
+  },
   ringingBox: {
     alignItems: 'center',
+    backgroundColor: '#ffb3d9',
+    borderRadius: 16,
+    padding: 24,
+    marginHorizontal: 20,
+    marginVertical: 24,
+    width: '90%',
+    zIndex: 10,
   },
   ringingTitle: {
     fontSize: 22,
