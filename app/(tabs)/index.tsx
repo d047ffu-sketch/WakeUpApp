@@ -31,6 +31,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { db } from '../../firebase';
 import { useAuth } from '../../lib/auth-context';
+import { useBackgroundColor } from '../../lib/background-color-context';
 import { joinMatchingPool, leaveMatchingPool, tryMatch } from '../../lib/matching';
 import {
   cancelAlarm,
@@ -48,6 +49,7 @@ type Status = 'idle' | 'ringing' | 'matching';
 
 export default function HomeScreen() {
   const { user } = useAuth();
+  const { backgroundColor } = useBackgroundColor();
   const router = useRouter();
   const [nickname, setNickname] = useState('');
   // 時間帯に応じたあいさつ（おはよう / こんにちは / こんばんは）。
@@ -242,7 +244,7 @@ export default function HomeScreen() {
   // ===== マッチング待機画面（下半分の中央にキャンセルボタン） =====
   if (status === 'matching') {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={[styles.container, { backgroundColor }]}>
         <View style={styles.matchingContainer}>
           {/* 上半分：くるくる＋案内（中央寄せ） */}
           <View style={styles.matchingTop}>
@@ -263,7 +265,7 @@ export default function HomeScreen() {
 
   // ===== 通常画面（idle / ringing） =====
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor }]}>
       <View style={styles.inner}>
         {/* あいさつ */}
         <Text style={styles.greeting}>{greeting}、{nickname || 'あなた'} さん</Text>

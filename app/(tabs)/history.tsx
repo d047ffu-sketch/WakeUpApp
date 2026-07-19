@@ -9,6 +9,7 @@ import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { db } from '../../firebase';
 import { useAuth } from '../../lib/auth-context';
+import { useBackgroundColor } from '../../lib/background-color-context';
 
 // 一覧に出す1件分のデータ。
 type HistoryItem = {
@@ -20,6 +21,7 @@ type HistoryItem = {
 
 export default function HistoryScreen() {
   const { user } = useAuth();
+  const { backgroundColor } = useBackgroundColor();
   const router = useRouter();
   const [items, setItems] = useState<HistoryItem[]>([]);
   // 取得済みのニックネームを覚えておき、同じ人を何度も読みに行かないようにする。
@@ -91,7 +93,7 @@ export default function HistoryScreen() {
   }, [user]);
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor }]}>
       <View style={styles.header}>
         <Text style={styles.title}>トーク履歴</Text>
       </View>

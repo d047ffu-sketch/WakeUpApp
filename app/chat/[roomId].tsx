@@ -32,6 +32,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { db } from '../../firebase';
 import { useAuth } from '../../lib/auth-context';
+import { useBackgroundColor } from '../../lib/background-color-context';
 
 // 会話できる時間（5分）。
 const CHAT_DURATION_MS = 5 * 60 * 1000;
@@ -47,6 +48,7 @@ export default function ChatRoomScreen() {
   // URL から部屋ID（/chat/xxxx の xxxx 部分）を受け取る。
   const { roomId } = useLocalSearchParams<{ roomId: string }>();
   const { user } = useAuth();
+  const { backgroundColor } = useBackgroundColor();
   const router = useRouter();
   const headerHeight = useHeaderHeight();
 
@@ -75,7 +77,7 @@ export default function ChatRoomScreen() {
     await updateDoc(doc(db, 'users', user.uid), {
       status: 'online',
       currentRoomId: '',
-    }).catch(() => {});
+    }).catch(() => { });
   }, [user]);
 
   // 部屋情報の読み込み＋メッセージのリアルタイム購読。
@@ -181,7 +183,7 @@ export default function ChatRoomScreen() {
       await updateDoc(doc(db, 'rooms', roomId), {
         lastMessage: text,
         lastActivityAt: serverTimestamp(),
-      }).catch(() => {});
+      }).catch(() => { });
     } catch {
       // 送信失敗時は入力を戻す。
       setInput(text);
@@ -196,7 +198,7 @@ export default function ChatRoomScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.center}>
+      <SafeAreaView style={[styles.center, { backgroundColor }]}>
         <Stack.Screen options={{ title: 'チャット' }} />
         <ActivityIndicator size="large" color="#1D3D47" />
       </SafeAreaView>
@@ -204,7 +206,7 @@ export default function ChatRoomScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
+    <SafeAreaView style={[styles.container, { backgroundColor }]} edges={['bottom']}>
       {/* ヘッダーのタイトルを相手の名前にする */}
       <Stack.Screen options={{ title: partnerName || 'チャット' }} />
 

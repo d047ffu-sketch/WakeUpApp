@@ -16,8 +16,10 @@ import {
   View,
 } from 'react-native';
 import { auth } from '../../firebase';
+import { useBackgroundColor } from '../../lib/background-color-context';
 
 export default function LoginScreen() {
+  const { backgroundColor } = useBackgroundColor();
   // 入力欄の状態を保持する。
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -46,7 +48,7 @@ export default function LoginScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { backgroundColor }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={styles.inner}>
         <Text style={styles.title}>Alチャット</Text>
