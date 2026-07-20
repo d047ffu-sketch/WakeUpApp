@@ -18,8 +18,10 @@ import {
   View,
 } from 'react-native';
 import { auth, db } from '../../firebase';
+import { useBackgroundColor } from '../../lib/background-color-context';
 
 export default function RegisterScreen() {
+  const { backgroundColor } = useBackgroundColor();
   const [nickname, setNickname] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -61,7 +63,7 @@ export default function RegisterScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { backgroundColor }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={styles.inner}>
         <Text style={styles.title}>Alチャット</Text>

@@ -9,9 +9,12 @@ import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth, db } from '../../firebase';
 import { useAuth } from '../../lib/auth-context';
+import { BACKGROUND_COLOR_OPTIONS, useBackgroundColor } from '../../lib/background-color-context';
+
 
 export default function SettingsScreen() {
   const { user } = useAuth();
+  const { backgroundColor, setBackgroundColor } = useBackgroundColor();
   const [nickname, setNickname] = useState('');
 
   // 自分のニックネームを読み込む。
@@ -24,6 +27,10 @@ export default function SettingsScreen() {
       }
     })();
   }, [user]);
+
+  const selectBackgroundColor = async (color: string) => {
+    await setBackgroundColor(color);
+  };
 
   // ログアウト確認 → 実行。成功すると _layout.tsx が自動でログイン画面へ戻す。
   const handleLogout = () => {
@@ -44,7 +51,7 @@ export default function SettingsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor }]}>
       <View style={styles.inner}>
         <Text style={styles.title}>設定</Text>
 
@@ -55,6 +62,25 @@ export default function SettingsScreen() {
           <View style={styles.divider} />
           <Text style={styles.label}>メールアドレス</Text>
           <Text style={styles.value}>{user?.email}</Text>
+        </View>
+
+        {/* 背景色の設定 */}
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>背景色</Text>
+          <View style={styles.optionsRow}>
+            {BACKGROUND_COLOR_OPTIONS.map((option) => (
+              <TouchableOpacity
+                key={option.id}
+                style={[
+                  styles.colorOption,
+                  { backgroundColor: option.color },
+                  option.color === backgroundColor && styles.colorOptionSelected,
+                ]}
+                onPress={() => selectBackgroundColor(option.color)}
+                accessibilityLabel={`${option.label}の背景色`}>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
 
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
@@ -112,5 +138,28 @@ const styles = StyleSheet.create({
     color: '#B00020',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1D3D47',
+    marginBottom: 12,
+  },
+  optionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginHorizontal: -4,
+  },
+  colorOption: {
+    width: 56,
+    height: 56,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    marginHorizontal: 4,
+  },
+  colorOptionSelected: {
+    borderColor: '#1D3D47',
+    borderWidth: 2,
   },
 });

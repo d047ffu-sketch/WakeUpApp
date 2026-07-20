@@ -8,6 +8,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { db } from '../../firebase';
 import { useAuth } from '../../lib/auth-context';
+import { useBackgroundColor } from '../../lib/background-color-context';
 
 // 何秒後にトーク画面へ移動するか。
 const COUNTDOWN_SEC = 3;
@@ -15,6 +16,7 @@ const COUNTDOWN_SEC = 3;
 export default function MatchSuccessScreen() {
   const { roomId } = useLocalSearchParams<{ roomId: string }>();
   const { user } = useAuth();
+  const { backgroundColor } = useBackgroundColor();
   const router = useRouter();
 
   const [partnerName, setPartnerName] = useState('');
@@ -60,13 +62,13 @@ export default function MatchSuccessScreen() {
   }, [count, roomId, router]);
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor }]}>
       <View style={styles.inner}>
         <Text style={styles.emoji}>🎉</Text>
         <Text style={styles.title}>マッチング成功！</Text>
 
         <Text style={styles.partnerLabel}>お相手</Text>
-        <Text style={styles.partnerName}>{partnerName || '...'} さん</Text>
+        <Text style={styles.partnerName}>{partnerName || '...' } さん</Text>
 
         <Text style={styles.countdown}>あと {count} 秒でトーク画面に移動します</Text>
       </View>

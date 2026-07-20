@@ -9,6 +9,7 @@ import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { db } from '../../firebase';
 import { useAuth } from '../../lib/auth-context';
+import { useBackgroundColor } from '../../lib/background-color-context';
 
 type Message = {
   id: string;
@@ -17,6 +18,7 @@ type Message = {
 };
 
 export default function HistoryDetailScreen() {
+  const { backgroundColor } = useBackgroundColor();
   const { roomId } = useLocalSearchParams<{ roomId: string }>();
   const { user } = useAuth();
   const [partnerName, setPartnerName] = useState('');
@@ -57,7 +59,7 @@ export default function HistoryDetailScreen() {
   }, [roomId]);
 
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
+    <SafeAreaView style={[styles.container, { backgroundColor }]} edges={['bottom']}>
       {/* ヘッダーのタイトルを相手の名前にする */}
       <Stack.Screen options={{
         title: partnerName || 'トーク履歴',
